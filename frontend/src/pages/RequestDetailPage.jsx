@@ -43,11 +43,13 @@ const workflowSteps = [
   { key: 'SUBMITTED', label: 'Submitted', description: 'Request captured', matches: ['SUBMITTED'] },
   { key: 'DEPARTMENT_APPROVAL_PENDING', label: 'Department Approval', description: 'Business approval review', matches: ['DEPARTMENT_APPROVAL_PENDING', 'CLARIFICATION_REQUESTED', 'DEPARTMENT_REJECTED'] },
   { key: 'IT_REVIEW_PENDING', label: 'Internal Review', description: 'Feasibility and priority review', matches: ['IT_REVIEW_PENDING', 'IT_REJECTED', 'DEFERRED'] },
-  { key: 'ASSIGNMENT_PENDING', label: 'Waiting For Assignment', description: 'Team member and reviewer selection', matches: ['ASSIGNMENT_PENDING'] },
-  { key: 'ASSIGNED', label: 'Team Assigned', description: 'Team assignment confirmed', matches: ['ASSIGNED'] },
+  { key: 'ASSIGNMENT_PENDING', label: 'PM Assignment', description: 'Project Manager selection', matches: ['ASSIGNMENT_PENDING', 'PM_ASSIGNED'] },
+  { key: 'SCOPE_REVIEW', label: 'Scope & Stories', description: 'Scope and user story review', matches: ['SCOPE_REVIEW', 'USER_STORY_REVIEW'] },
+  { key: 'DEVELOPER_ASSIGNED', label: 'Team Assigned', description: 'Developer and reviewer confirmed', matches: ['ASSIGNED', 'DEVELOPER_ASSIGNED', 'SPRINT_PLANNING'] },
   { key: 'IN_DEVELOPMENT', label: 'Work In Progress', description: 'Active implementation', matches: ['IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'] },
-  { key: 'IN_TESTING', label: 'Review & Validation', description: 'Quality review and validation', matches: ['IN_TESTING', 'TEST_FAILED'] },
-  { key: 'UAT_PENDING', label: 'Final Approval', description: 'Final business approval', matches: ['UAT_PENDING', 'UAT_REJECTED'] },
+  { key: 'QA_PENDING', label: 'Review & Validation', description: 'Quality review and validation', matches: ['QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'IN_TESTING', 'TEST_FAILED'] },
+  { key: 'UAT_PENDING', label: 'Final Approval', description: 'Final business approval', matches: ['UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'UAT_REJECTED'] },
+  { key: 'DEPLOYMENT_PENDING', label: 'Deployment', description: 'Deployment and release', matches: ['DEPLOYMENT_PENDING', 'DEPLOYED'] },
   { key: 'CLOSED', label: 'Completed', description: 'Request completed', matches: ['CLOSED'] },
 ];
 
@@ -55,13 +57,20 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/a
 
 const progressVisibleStatuses = new Set([
   'ASSIGNED',
+  'DEVELOPER_ASSIGNED',
+  'SPRINT_PLANNING',
   'IN_DEVELOPMENT',
   'DEVELOPMENT_COMPLETE',
+  'QA_PENDING',
+  'QA_FAILED',
+  'QA_PASSED',
   'IN_TESTING',
   'TEST_FAILED',
   'UAT_PENDING',
+  'UAT_FAILED',
   'UAT_APPROVED',
   'UAT_REJECTED',
+  'DEPLOYMENT_PENDING',
   'DEPLOYED',
   'CLOSED',
 ]);
@@ -1744,10 +1753,10 @@ function WorkflowActions(props) {
   const canRespondClarification = request.status === 'CLARIFICATION_REQUESTED' && request.requester_user_id === user?.id;
   const canReviewIt = request.status === 'IT_REVIEW_PENDING' && (role === 'IT_HEAD' || isAdmin);
   const hasActiveAssignment = Boolean(request.active_assignment_id);
-  const canAssign = ['ASSIGNMENT_PENDING', 'ASSIGNED'].includes(request.status) && (role === 'IT_HEAD' || role === 'PROJECT_MANAGER' || isAdmin);
-  const canStartDevelopment = request.status === 'ASSIGNED' && (role === 'DEVELOPER' || isAdmin);
+  const canAssign = ['USER_STORY_REVIEW', 'DEVELOPER_ASSIGNED'].includes(request.status) && (role === 'PROJECT_MANAGER' || isAdmin);
+  const canStartDevelopment = ['DEVELOPER_ASSIGNED', 'SPRINT_PLANNING', 'ASSIGNED', 'QA_FAILED', 'UAT_FAILED'].includes(request.status) && (role === 'DEVELOPER' || isAdmin);
   const canUpdateDevelopment = request.status === 'IN_DEVELOPMENT' && (role === 'DEVELOPER' || isAdmin);
-  const canTest = request.status === 'IN_TESTING' && (role === 'QA' || isAdmin);
+  const canTest = ['QA_PENDING', 'IN_TESTING'].includes(request.status) && (role === 'QA' || isAdmin);
   const canUat = request.status === 'UAT_PENDING' && (role === 'UAT_APPROVER' || isAdmin);
   const hasActions = canDepartmentApprove || canRespondClarification || canReviewIt || canAssign || canStartDevelopment || canUpdateDevelopment || canTest || canUat;
   const [selectedActionId, setSelectedActionId] = useState('');

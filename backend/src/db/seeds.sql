@@ -3,6 +3,7 @@ INSERT INTO roles (code, name, description) VALUES
   ('EMPLOYEE', 'Employee', 'Creates and tracks software requests.'),
   ('DEPARTMENT_HEAD', 'Department Head', 'Approves or rejects requests for a department.'),
   ('IT_HEAD', 'IT Head', 'Reviews feasibility, prioritizes, and assigns work owners.'),
+  ('PROJECT_MANAGER', 'Project Manager', 'Owns scope definition, user stories, sprint planning, developer assignment, and delivery tracking.'),
   ('DEVELOPER', 'Assigned Team Member', 'Works on assigned requests and records progress.'),
   ('QA', 'Reviewer', 'Performs review and validation before final approval.'),
   ('UAT_APPROVER', 'Final Approver', 'Performs final business approval before completion.')

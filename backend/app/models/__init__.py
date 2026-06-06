@@ -101,6 +101,7 @@ class Request(Base):
     requester_department_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("departments.id"), nullable=False)
     department_head_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
     it_head_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    project_manager_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
     current_assignee_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
     progress_percentage: Mapped[int] = mapped_column(TINYINT(unsigned=True), nullable=False, server_default="0")
     feasibility_notes: Mapped[Optional[str]] = mapped_column(Text)
@@ -181,6 +182,82 @@ class RequestStatusHistory(Base):
     changed_by_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     comment: Mapped[Optional[str]] = mapped_column(Text)
     changed_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class ProjectScope(Base):
+    __tablename__ = "project_scopes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("requests.id"), nullable=False)
+    scope_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    scope_description: Mapped[str] = mapped_column(Text, nullable=False)
+    business_objectives: Mapped[Optional[str]] = mapped_column(Text)
+    in_scope: Mapped[Optional[str]] = mapped_column(Text)
+    out_of_scope: Mapped[Optional[str]] = mapped_column(Text)
+    assumptions: Mapped[Optional[str]] = mapped_column(Text)
+    dependencies: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(ENUM("DRAFT", "SUBMITTED", "APPROVED", "REWORK_REQUIRED"), nullable=False, server_default="DRAFT")
+    created_by_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    review_comments: Mapped[Optional[str]] = mapped_column(Text)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class UserStory(Base):
+    __tablename__ = "user_stories"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("requests.id"), nullable=False)
+    story_key: Mapped[Optional[str]] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    acceptance_criteria: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[str] = mapped_column(ENUM("LOW", "MEDIUM", "HIGH", "CRITICAL"), nullable=False, server_default="MEDIUM")
+    status: Mapped[str] = mapped_column(ENUM("DRAFT", "SUBMITTED", "APPROVED", "REWORK_REQUIRED"), nullable=False, server_default="DRAFT")
+    created_by_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    review_comments: Mapped[Optional[str]] = mapped_column(Text)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class Sprint(Base):
+    __tablename__ = "sprints"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    request_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("requests.id"), nullable=False)
+    sprint_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    goal: Mapped[Optional[str]] = mapped_column(Text)
+    start_date: Mapped[Optional[date]] = mapped_column(Date)
+    end_date: Mapped[Optional[date]] = mapped_column(Date)
+    estimated_hours: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 2))
+    actual_hours: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 2))
+    status: Mapped[str] = mapped_column(ENUM("PLANNED", "CREATED", "ACTIVE", "COMPLETED", "CANCELLED"), nullable=False, server_default="PLANNED")
+    created_by_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class SprintTask(Base):
+    __tablename__ = "sprint_tasks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sprint_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("sprints.id"), nullable=False)
+    user_story_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("user_stories.id"))
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    assigned_developer_user_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.id"))
+    estimate_hours: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 2))
+    actual_hours: Mapped[Optional[float]] = mapped_column(DECIMAL(10, 2))
+    priority: Mapped[str] = mapped_column(ENUM("LOW", "MEDIUM", "HIGH", "CRITICAL"), nullable=False, server_default="MEDIUM")
+    status: Mapped[str] = mapped_column(ENUM("TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"), nullable=False, server_default="TODO")
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime)
 
 
 class DevelopmentUpdate(Base):

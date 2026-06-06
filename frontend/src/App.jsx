@@ -14,6 +14,13 @@ import NotificationsPage from './pages/NotificationsPage';
 import OrganizationDirectoryPage from './pages/OrganizationDirectoryPage';
 import UserManualPage from './pages/UserManualPage';
 import DeveloperWorkloadPage from './pages/DeveloperWorkloadPage';
+import {
+  ProjectManagerDashboardPage,
+  ScopeManagementPage,
+  SprintManagementPage,
+  SprintTaskBoardPage,
+  UserStoryManagementPage,
+} from './pages/ProjectManagerWorkspacePage';
 
 export default function App() {
   return (
@@ -29,6 +36,21 @@ export default function App() {
           </Route>
           <Route path="/requests/:id" element={<RequestDetailPage />} />
           <Route path="/organization" element={<OrganizationDirectoryPage />} />
+          <Route element={<RoleRoute roles={routePermissions['/project-manager']} />}>
+            <Route path="/project-manager" element={<ProjectManagerDashboardPage />} />
+          </Route>
+          <Route element={<RoleRoute roles={routePermissions['/project-scopes']} />}>
+            <Route path="/project-scopes" element={<ScopeManagementPage />} />
+          </Route>
+          <Route element={<RoleRoute roles={routePermissions['/user-stories']} />}>
+            <Route path="/user-stories" element={<UserStoryManagementPage />} />
+          </Route>
+          <Route element={<RoleRoute roles={routePermissions['/sprints']} />}>
+            <Route path="/sprints" element={<SprintManagementPage />} />
+          </Route>
+          <Route element={<RoleRoute roles={routePermissions['/sprint-board']} />}>
+            <Route path="/sprint-board" element={<SprintTaskBoardPage />} />
+          </Route>
           <Route element={<RoleRoute roles={routePermissions['/development']} />}>
             <Route path="/development" element={<RequestsPage presetStatus="IN_DEVELOPMENT" />} />
           </Route>

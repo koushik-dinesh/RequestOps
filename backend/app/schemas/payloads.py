@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -84,6 +85,7 @@ class ReassignResponsibilitiesPayload(CamelModel):
     departmentHeadUserId: int | None = Field(default=None, gt=0)
     currentAssigneeUserId: int | None = Field(default=None, gt=0)
     itHeadUserId: int | None = Field(default=None, gt=0)
+    projectManagerUserId: int | None = Field(default=None, gt=0)
     developerUserId: int | None = Field(default=None, gt=0)
     qaUserId: int | None = Field(default=None, gt=0)
     reportingManagerUserId: int | None = Field(default=None, gt=0)
@@ -122,6 +124,16 @@ class RequestCreatePayload(CamelModel):
     roiEmployeesBenefited: int | None = Field(default=None, ge=0)
     roiMonthlyCostSavingsInr: float | None = Field(default=None, ge=0)
 
+    @model_validator(mode="after")
+    def validate_roi_values(self):
+        if self.roiType == "TIME_SAVINGS" and (
+            self.roiHoursSavedPerEmployeePerMonth is None or self.roiEmployeesBenefited is None
+        ):
+            raise ValueError("Hours saved and employees benefited are required for time savings ROI.")
+        if self.roiType == "COST_SAVINGS" and self.roiMonthlyCostSavingsInr is None:
+            raise ValueError("Monthly cost savings is required for cost savings ROI.")
+        return self
+
 
 class RequestDetailsPayload(CamelModel):
     title: str = Field(min_length=5)
@@ -135,6 +147,16 @@ class RoiPayload(CamelModel):
     roiHoursSavedPerEmployeePerMonth: float | None = Field(default=None, ge=0)
     roiEmployeesBenefited: int | None = Field(default=None, ge=0)
     roiMonthlyCostSavingsInr: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_roi_values(self):
+        if self.roiType == "TIME_SAVINGS" and (
+            self.roiHoursSavedPerEmployeePerMonth is None or self.roiEmployeesBenefited is None
+        ):
+            raise ValueError("Hours saved and employees benefited are required for time savings ROI.")
+        if self.roiType == "COST_SAVINGS" and self.roiMonthlyCostSavingsInr is None:
+            raise ValueError("Monthly cost savings is required for cost savings ROI.")
+        return self
 
 
 class CommentPayload(CamelModel):
@@ -173,6 +195,71 @@ class ItReviewApprovePayload(CamelModel):
     estimatedEffort: str = Field(min_length=1)
     priorityConfirmation: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
     comment: str | None = None
+
+
+class ProjectManagerAssignPayload(CamelModel):
+    projectManagerUserId: int = Field(gt=0)
+    notes: str | None = None
+
+
+class ProjectScopePayload(CamelModel):
+    scopeTitle: str = Field(min_length=3, max_length=255)
+    scopeDescription: str = Field(min_length=10)
+    businessObjectives: str | None = None
+    inScope: str | None = None
+    outOfScope: str | None = None
+    assumptions: str | None = None
+    dependencies: str | None = None
+    status: Literal["DRAFT", "SUBMITTED"] = "DRAFT"
+
+
+class ProjectScopeReviewPayload(CamelModel):
+    decision: Literal["APPROVED", "REWORK_REQUIRED"]
+    reviewComments: str | None = None
+
+
+class UserStoryPayload(CamelModel):
+    storyKey: str | None = Field(default=None, max_length=80)
+    title: str = Field(min_length=3, max_length=255)
+    description: str = Field(min_length=10)
+    acceptanceCriteria: str = Field(min_length=5)
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+    status: Literal["DRAFT", "SUBMITTED"] = "DRAFT"
+
+
+class UserStoryReviewPayload(CamelModel):
+    decision: Literal["APPROVED", "REWORK_REQUIRED"]
+    reviewComments: str | None = None
+
+
+class SprintPayload(CamelModel):
+    sprintName: str = Field(min_length=2, max_length=180)
+    goal: str | None = None
+    startDate: date | None = None
+    endDate: date | None = None
+    estimatedHours: float | None = Field(default=None, ge=0)
+    actualHours: float | None = Field(default=None, ge=0)
+    status: Literal["PLANNED", "CREATED"] = "PLANNED"
+
+
+class SprintTaskPayload(CamelModel):
+    userStoryId: int | None = Field(default=None, gt=0)
+    title: str = Field(min_length=3, max_length=255)
+    description: str | None = None
+    assignedDeveloperUserId: int | None = Field(default=None, gt=0)
+    estimateHours: float | None = Field(default=None, ge=0)
+    actualHours: float | None = Field(default=None, ge=0)
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+    status: Literal["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"] = "TODO"
+
+
+class SprintTaskAssignPayload(CamelModel):
+    developerUserId: int = Field(gt=0)
+
+
+class SprintTaskStatusPayload(CamelModel):
+    status: Literal["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"]
+    actualHours: float | None = Field(default=None, ge=0)
 
 
 class AssignPayload(CamelModel):

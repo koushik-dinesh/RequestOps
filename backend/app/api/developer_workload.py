@@ -10,13 +10,20 @@ router = APIRouter(prefix="/developer-workload", tags=["developer-workload"], de
 
 ALLOWED_ROLES = {"SYSTEM_ADMIN", "IT_HEAD", "PROJECT_MANAGER", "DEVELOPER", "QA"}
 ACTIVE_WORK_STATUSES = [
+    "DEVELOPER_ASSIGNED",
+    "SPRINT_PLANNING",
     "ASSIGNED",
     "IN_DEVELOPMENT",
     "DEVELOPMENT_COMPLETE",
+    "QA_PENDING",
+    "QA_FAILED",
+    "QA_PASSED",
     "IN_TESTING",
     "TEST_FAILED",
     "UAT_PENDING",
+    "UAT_FAILED",
     "UAT_REJECTED",
+    "DEPLOYMENT_PENDING",
 ]
 WORKLOAD_THRESHOLDS = {
     "availableMax": 3,
@@ -50,9 +57,9 @@ def list_developer_workload(user: dict = Depends(get_current_user), db: Session 
             u.department_id,
             d.name AS department_name,
             COUNT(DISTINCT r.id) AS active_request_count,
-            SUM(CASE WHEN r.status = 'IN_DEVELOPMENT' THEN 1 ELSE 0 END) AS in_development_count,
-            SUM(CASE WHEN r.status IN ('IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS in_testing_count,
-            SUM(CASE WHEN r.status IN ('DEVELOPMENT_COMPLETE', 'IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS qa_pending_count
+            SUM(CASE WHEN r.status IN ('IN_DEVELOPMENT', 'QA_FAILED', 'UAT_FAILED') THEN 1 ELSE 0 END) AS in_development_count,
+            SUM(CASE WHEN r.status IN ('QA_PENDING', 'IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS in_testing_count,
+            SUM(CASE WHEN r.status IN ('DEVELOPMENT_COMPLETE', 'QA_PENDING', 'IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS qa_pending_count
         FROM users u
         JOIN roles role ON role.id = u.role_id
         LEFT JOIN departments d ON d.id = u.department_id

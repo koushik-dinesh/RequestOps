@@ -400,7 +400,7 @@ function RequestMobileCard({ row, onOpen }) {
 
 function ProgressCell({ value, status }) {
   const progress = Number(value || 0);
-  const shouldShow = ['ASSIGNED', 'IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE', 'IN_TESTING', 'UAT_PENDING', 'CLOSED'].includes(status) || progress > 0;
+  const shouldShow = ['ASSIGNED', 'DEVELOPER_ASSIGNED', 'SPRINT_PLANNING', 'IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE', 'QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'IN_TESTING', 'UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'DEPLOYMENT_PENDING', 'DEPLOYED', 'CLOSED'].includes(status) || progress > 0;
   if (!shouldShow) return <Typography variant="caption" color="text.secondary">-</Typography>;
 
   return (

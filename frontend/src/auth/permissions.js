@@ -14,10 +14,15 @@ export const routePermissions = {
   '/requests': ['*'],
   '/requests/new': [roles.EMPLOYEE],
   '/organization': ['*'],
-  '/development': [roles.IT_HEAD, roles.DEVELOPER, roles.ADMIN],
+  '/project-manager': [roles.ADMIN, roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEPARTMENT_HEAD],
+  '/project-scopes': [roles.ADMIN, roles.IT_HEAD, roles.PROJECT_MANAGER],
+  '/user-stories': [roles.ADMIN, roles.PROJECT_MANAGER, roles.DEPARTMENT_HEAD],
+  '/sprints': [roles.ADMIN, roles.PROJECT_MANAGER],
+  '/sprint-board': [roles.ADMIN, roles.PROJECT_MANAGER, roles.DEVELOPER],
+  '/development': [roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEVELOPER, roles.ADMIN],
   '/developer-workload': [roles.ADMIN, roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEVELOPER, roles.QA],
-  '/testing': [roles.IT_HEAD, roles.QA, roles.ADMIN],
-  '/uat': [roles.UAT, roles.ADMIN],
+  '/testing': [roles.IT_HEAD, roles.PROJECT_MANAGER, roles.QA, roles.ADMIN],
+  '/uat': [roles.PROJECT_MANAGER, roles.UAT, roles.ADMIN],
   '/notifications': ['*'],
   '/manual': ['*'],
   '/admin': [roles.ADMIN],
@@ -36,7 +41,7 @@ export function canUseAdminConsole(roleCode) {
 }
 
 export function canUseRequestScopeTabs(roleCode) {
-  return [roles.ADMIN, roles.IT_HEAD, roles.DEPARTMENT_HEAD].includes(roleCode);
+  return [roles.ADMIN, roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEPARTMENT_HEAD].includes(roleCode);
 }
 
 export function getDefaultRequestScope(roleCode) {

@@ -125,12 +125,25 @@ CREATE TABLE IF NOT EXISTS requests (
     'TEST_FAILED',
     'UAT_PENDING',
     'UAT_REJECTED',
-    'CLOSED'
+    'CLOSED',
+    'PM_ASSIGNED',
+    'SCOPE_REVIEW',
+    'USER_STORY_REVIEW',
+    'DEVELOPER_ASSIGNED',
+    'SPRINT_PLANNING',
+    'QA_PENDING',
+    'QA_FAILED',
+    'QA_PASSED',
+    'UAT_FAILED',
+    'UAT_APPROVED',
+    'DEPLOYMENT_PENDING',
+    'DEPLOYED'
   ) NOT NULL DEFAULT 'SUBMITTED',
   requester_user_id BIGINT UNSIGNED NOT NULL,
   requester_department_id BIGINT UNSIGNED NOT NULL,
   department_head_user_id BIGINT UNSIGNED NULL,
   it_head_user_id BIGINT UNSIGNED NULL,
+  project_manager_user_id BIGINT UNSIGNED NULL,
   current_assignee_user_id BIGINT UNSIGNED NULL,
   progress_percentage TINYINT UNSIGNED NOT NULL DEFAULT 0,
   feasibility_notes TEXT,
@@ -145,10 +158,12 @@ CREATE TABLE IF NOT EXISTS requests (
   CONSTRAINT fk_requests_department FOREIGN KEY (requester_department_id) REFERENCES departments(id),
   CONSTRAINT fk_requests_department_head FOREIGN KEY (department_head_user_id) REFERENCES users(id),
   CONSTRAINT fk_requests_it_head FOREIGN KEY (it_head_user_id) REFERENCES users(id),
+  CONSTRAINT fk_requests_project_manager FOREIGN KEY (project_manager_user_id) REFERENCES users(id),
   CONSTRAINT fk_requests_current_assignee FOREIGN KEY (current_assignee_user_id) REFERENCES users(id),
   INDEX idx_requests_status (status),
   INDEX idx_requests_requester (requester_user_id),
   INDEX idx_requests_department (requester_department_id),
+  INDEX idx_requests_project_manager (project_manager_user_id),
   INDEX idx_requests_current_assignee (current_assignee_user_id),
   INDEX idx_requests_priority_status (priority, status),
   FULLTEXT INDEX ft_requests_search (request_number, title, description)
@@ -171,7 +186,19 @@ ALTER TABLE requests
     'TEST_FAILED',
     'UAT_PENDING',
     'UAT_REJECTED',
-    'CLOSED'
+    'CLOSED',
+    'PM_ASSIGNED',
+    'SCOPE_REVIEW',
+    'USER_STORY_REVIEW',
+    'DEVELOPER_ASSIGNED',
+    'SPRINT_PLANNING',
+    'QA_PENDING',
+    'QA_FAILED',
+    'QA_PASSED',
+    'UAT_FAILED',
+    'UAT_APPROVED',
+    'DEPLOYMENT_PENDING',
+    'DEPLOYED'
   ) NOT NULL DEFAULT 'SUBMITTED';
 
 ALTER TABLE requests
@@ -278,6 +305,98 @@ CREATE TABLE IF NOT EXISTS request_status_history (
   CONSTRAINT fk_status_history_user FOREIGN KEY (changed_by_user_id) REFERENCES users(id),
   INDEX idx_status_history_request_changed (request_id, changed_at),
   INDEX idx_status_history_to_status (to_status)
+);
+
+CREATE TABLE IF NOT EXISTS project_scopes (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  request_id BIGINT UNSIGNED NOT NULL,
+  scope_title VARCHAR(255) NOT NULL,
+  scope_description TEXT NOT NULL,
+  business_objectives TEXT NULL,
+  in_scope TEXT NULL,
+  out_of_scope TEXT NULL,
+  assumptions TEXT NULL,
+  dependencies TEXT NULL,
+  status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REWORK_REQUIRED') NOT NULL DEFAULT 'DRAFT',
+  created_by_user_id BIGINT UNSIGNED NOT NULL,
+  reviewed_by_user_id BIGINT UNSIGNED NULL,
+  review_comments TEXT NULL,
+  reviewed_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_project_scopes_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_project_scopes_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_project_scopes_reviewed_by FOREIGN KEY (reviewed_by_user_id) REFERENCES users(id),
+  INDEX idx_project_scopes_request_status (request_id, status),
+  INDEX idx_project_scopes_created_by (created_by_user_id),
+  INDEX idx_project_scopes_reviewed_by (reviewed_by_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_stories (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  request_id BIGINT UNSIGNED NOT NULL,
+  story_key VARCHAR(80) NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL,
+  acceptance_criteria TEXT NOT NULL,
+  priority ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'MEDIUM',
+  status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REWORK_REQUIRED') NOT NULL DEFAULT 'DRAFT',
+  created_by_user_id BIGINT UNSIGNED NOT NULL,
+  reviewed_by_user_id BIGINT UNSIGNED NULL,
+  review_comments TEXT NULL,
+  reviewed_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_user_stories_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_user_stories_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_user_stories_reviewed_by FOREIGN KEY (reviewed_by_user_id) REFERENCES users(id),
+  UNIQUE KEY uq_user_stories_request_story_key (request_id, story_key),
+  INDEX idx_user_stories_request_status (request_id, status),
+  INDEX idx_user_stories_created_by (created_by_user_id),
+  INDEX idx_user_stories_reviewed_by (reviewed_by_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS sprints (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  request_id BIGINT UNSIGNED NOT NULL,
+  sprint_name VARCHAR(180) NOT NULL,
+  goal TEXT NULL,
+  start_date DATE NULL,
+  end_date DATE NULL,
+  estimated_hours DECIMAL(10,2) NULL,
+  actual_hours DECIMAL(10,2) NULL,
+  status ENUM('PLANNED', 'CREATED', 'ACTIVE', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PLANNED',
+  created_by_user_id BIGINT UNSIGNED NOT NULL,
+  started_at TIMESTAMP NULL,
+  completed_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sprints_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_sprints_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  INDEX idx_sprints_request_status (request_id, status),
+  INDEX idx_sprints_created_by (created_by_user_id),
+  INDEX idx_sprints_dates (start_date, end_date)
+);
+
+CREATE TABLE IF NOT EXISTS sprint_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  sprint_id BIGINT UNSIGNED NOT NULL,
+  user_story_id BIGINT UNSIGNED NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  assigned_developer_user_id BIGINT UNSIGNED NULL,
+  estimate_hours DECIMAL(10,2) NULL,
+  actual_hours DECIMAL(10,2) NULL,
+  priority ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'MEDIUM',
+  status ENUM('TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'TODO',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sprint_tasks_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id),
+  CONSTRAINT fk_sprint_tasks_user_story FOREIGN KEY (user_story_id) REFERENCES user_stories(id),
+  CONSTRAINT fk_sprint_tasks_developer FOREIGN KEY (assigned_developer_user_id) REFERENCES users(id),
+  INDEX idx_sprint_tasks_sprint_status (sprint_id, status),
+  INDEX idx_sprint_tasks_story (user_story_id),
+  INDEX idx_sprint_tasks_developer (assigned_developer_user_id)
 );
 
 CREATE TABLE IF NOT EXISTS development_updates (

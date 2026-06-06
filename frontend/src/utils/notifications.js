@@ -9,13 +9,13 @@ export const notificationFilters = [
 ];
 
 const notificationTypeRules = [
-  { match: ['APPROVAL', 'AWAITING_APPROVAL', 'IT_REVIEW_PENDING', 'UAT_PENDING'], label: 'Approval Required', category: 'APPROVALS', tone: 'warning' },
+  { match: ['APPROVAL', 'AWAITING_APPROVAL', 'IT_REVIEW_PENDING', 'UAT_PENDING', 'USER_STORIES_REVIEW'], label: 'Approval Required', category: 'APPROVALS', tone: 'warning' },
   { match: ['APPROVED', 'CLOSED'], label: 'Approved', category: 'APPROVALS', tone: 'success' },
   { match: ['REJECTED', 'FAILED'], label: 'Rejected', category: 'APPROVALS', tone: 'error' },
   { match: ['CLARIFICATION'], label: 'Clarification Received', category: 'CLARIFICATIONS', tone: 'info' },
-  { match: ['ASSIGNED', 'ASSIGNMENT'], label: 'Developer Assigned', category: 'ASSIGNMENTS', tone: 'primary' },
+  { match: ['PROJECT_MANAGER_ASSIGNED', 'ASSIGNED', 'ASSIGNMENT'], label: 'Assignment', category: 'ASSIGNMENTS', tone: 'primary' },
   { match: ['COMMENT'], label: 'Comment Added', category: 'COMMENTS', tone: 'neutral' },
-  { match: ['STATUS', 'PROGRESS', 'DEVELOPMENT', 'TESTING', 'UAT'], label: 'Status Changed', category: 'SYSTEM', tone: 'primary' },
+  { match: ['STATUS', 'PROGRESS', 'DEVELOPMENT', 'TESTING', 'QA', 'UAT', 'SCOPE', 'SPRINT', 'DEPLOYMENT'], label: 'Status Changed', category: 'SYSTEM', tone: 'primary' },
 ];
 
 export function getNotificationMeta(notification = {}) {

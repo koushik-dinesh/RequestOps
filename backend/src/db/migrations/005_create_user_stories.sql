@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS user_stories (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  request_id BIGINT UNSIGNED NOT NULL,
+  story_key VARCHAR(80) NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NOT NULL,
+  acceptance_criteria TEXT NOT NULL,
+  priority ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'MEDIUM',
+  status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REWORK_REQUIRED') NOT NULL DEFAULT 'DRAFT',
+  created_by_user_id BIGINT UNSIGNED NOT NULL,
+  reviewed_by_user_id BIGINT UNSIGNED NULL,
+  review_comments TEXT NULL,
+  reviewed_at TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_user_stories_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_user_stories_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_user_stories_reviewed_by FOREIGN KEY (reviewed_by_user_id) REFERENCES users(id),
+  UNIQUE KEY uq_user_stories_request_story_key (request_id, story_key),
+  INDEX idx_user_stories_request_status (request_id, status),
+  INDEX idx_user_stories_created_by (created_by_user_id),
+  INDEX idx_user_stories_reviewed_by (reviewed_by_user_id)
+);

@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS sprint_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  sprint_id BIGINT UNSIGNED NOT NULL,
+  user_story_id BIGINT UNSIGNED NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT NULL,
+  assigned_developer_user_id BIGINT UNSIGNED NULL,
+  estimate_hours DECIMAL(10,2) NULL,
+  actual_hours DECIMAL(10,2) NULL,
+  priority ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'MEDIUM',
+  status ENUM('TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'TODO',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sprint_tasks_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id),
+  CONSTRAINT fk_sprint_tasks_user_story FOREIGN KEY (user_story_id) REFERENCES user_stories(id),
+  CONSTRAINT fk_sprint_tasks_developer FOREIGN KEY (assigned_developer_user_id) REFERENCES users(id),
+  INDEX idx_sprint_tasks_sprint_status (sprint_id, status),
+  INDEX idx_sprint_tasks_story (user_story_id),
+  INDEX idx_sprint_tasks_developer (assigned_developer_user_id)
+);

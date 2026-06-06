@@ -80,6 +80,16 @@ const navGroups = [
     ],
   },
   {
+    label: 'Project Management',
+    items: [
+      { label: 'PM Dashboard', path: '/project-manager', icon: Gauge, route: '/project-manager' },
+      { label: 'Scope Management', path: '/project-scopes', icon: ClipboardList, route: '/project-scopes' },
+      { label: 'User Stories', path: '/user-stories', icon: BookOpen, route: '/user-stories' },
+      { label: 'Sprint Management', path: '/sprints', icon: Code2, route: '/sprints' },
+      { label: 'Sprint Task Board', path: '/sprint-board', icon: ClipboardList, route: '/sprint-board' },
+    ],
+  },
+  {
     label: 'System',
     items: [
       { label: 'Notifications', path: '/notifications', icon: Bell, route: '/notifications' },
