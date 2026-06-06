@@ -13,6 +13,7 @@ import AdminPage from './pages/AdminPage';
 import NotificationsPage from './pages/NotificationsPage';
 import OrganizationDirectoryPage from './pages/OrganizationDirectoryPage';
 import UserManualPage from './pages/UserManualPage';
+import DeveloperWorkloadPage from './pages/DeveloperWorkloadPage';
 
 export default function App() {
   return (
@@ -30,6 +31,9 @@ export default function App() {
           <Route path="/organization" element={<OrganizationDirectoryPage />} />
           <Route element={<RoleRoute roles={routePermissions['/development']} />}>
             <Route path="/development" element={<RequestsPage presetStatus="IN_DEVELOPMENT" />} />
+          </Route>
+          <Route element={<RoleRoute roles={routePermissions['/developer-workload']} />}>
+            <Route path="/developer-workload" element={<DeveloperWorkloadPage />} />
           </Route>
           <Route element={<RoleRoute roles={routePermissions['/testing']} />}>
             <Route path="/testing" element={<RequestsPage presetStatus="IN_TESTING" />} />

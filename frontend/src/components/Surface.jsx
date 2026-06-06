@@ -78,7 +78,7 @@ export function MetricCard({ label, value, icon, accent = '#2563EB', trend = 'Li
           </Stack>
         </Stack>
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mt: 2.2 }}>
-          <Typography variant="caption" color="text.secondary">{caption || 'Updated in real time'}</Typography>
+          {caption && <Typography variant="caption" color="text.secondary">{caption}</Typography>}
           <Typography variant="caption" fontWeight={850} color={accent}>{trend}</Typography>
         </Stack>
         {typeof progress === 'number' && (

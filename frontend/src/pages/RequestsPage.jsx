@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  Avatar,
   Box,
   Button,
   LinearProgress,
   MenuItem,
   Pagination,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
+  Tabs,
   TextField,
   Typography,
 } from '@mui/material';
@@ -24,8 +25,9 @@ import api from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { canCreateRequest, canUseRequestScopeTabs, getDefaultRequestScope } from '../auth/permissions';
 import StatusBadge from '../components/StatusBadge';
-import { priorities, requestTypes, formatEnum, missingReportingAuthorityText } from '../utils/constants';
+import { priorities, requestTypes, formatEnum } from '../utils/constants';
 import { Page } from '../components/LayoutPrimitives';
+import PageHeader from '../components/PageHeader';
 
 const pageSize = 10;
 
@@ -46,6 +48,24 @@ const requestScopes = [
   { label: 'All Requests', value: 'department' },
   { label: 'My Requests', value: 'mine' },
 ];
+
+const pageMetaByPreset = {
+  IN_DEVELOPMENT: {
+    eyebrow: 'WORK EXECUTION',
+    title: 'Work In Progress',
+    description: 'Track active delivery work, implementation progress, and assigned request execution.',
+  },
+  IN_TESTING: {
+    eyebrow: 'QUALITY REVIEW',
+    title: 'Review & Validation',
+    description: 'Review requests moving through testing, validation, and quality checks.',
+  },
+  UAT_PENDING: {
+    eyebrow: 'FINAL APPROVAL',
+    title: 'Final Approval Queue',
+    description: 'Review requests awaiting final business approval and closure.',
+  },
+};
 
 export default function RequestsPage({ presetStatus = '' }) {
   const navigate = useNavigate();
@@ -100,7 +120,7 @@ export default function RequestsPage({ presetStatus = '' }) {
     closed: rows.filter((row) => row.status === 'CLOSED').length,
   };
 
-  const filteredRows = useMemo(() => rows
+  const filteredRows = useMemo(() => [...rows]
     .sort((a, b) => {
       const aValue = a[sort.key] || '';
       const bValue = b[sort.key] || '';
@@ -128,25 +148,28 @@ export default function RequestsPage({ presetStatus = '' }) {
     }));
   }
 
+  const pageMeta = pageMetaByPreset[presetStatus] || {
+    eyebrow: 'REQUEST MANAGEMENT',
+    title: 'Requests',
+    description: 'Track, review, assign, and manage software requirement requests throughout their lifecycle.',
+  };
+
   return (
     <Page maxWidth={1580}>
       <Stack spacing={2}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' } }}>
-          <Box>
-            <Typography variant="h4" sx={{ fontSize: { xs: 28, md: 32 } }}>Requests</Typography>
-            <Typography color="text.secondary" variant="body2">
-              {scope === 'mine'
-                ? 'Requests created by you'
-                : `Requests from ${user?.departmentName || 'your department'}`}
-            </Typography>
-          </Box>
+        <PageHeader
+          eyebrow={pageMeta.eyebrow}
+          title={pageMeta.title}
+          description={pageMeta.description}
+          actions={(
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
             {canCreateRequest(user?.roleCode) && (
               <Button variant="contained" startIcon={<AddIcon />} component={Link} to="/requests/new">New Request</Button>
             )}
             <Button variant="outlined" startIcon={<RefreshIcon />} onClick={load}>Refresh</Button>
           </Stack>
-        </Stack>
+          )}
+        />
 
         <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
           <CompactKpi label="Total Requests" value={stats.total} />
@@ -170,51 +193,42 @@ export default function RequestsPage({ presetStatus = '' }) {
           }}
         >
           {canUseRequestScopeTabs(user?.roleCode) && (
-            <Stack direction="row" spacing={0.5} sx={{ px: 1.5, pt: 1.25, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, overflowX: 'auto', scrollbarWidth: 'thin' }}>
-              {requestScopes.map((item) => (
-              <Button
-                key={item.value}
-                onClick={() => {
+            <Box sx={{ px: 1.5, pt: 1.25, pb: 1, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}` }}>
+              <Tabs
+                value={scope}
+                onChange={(_, value) => {
                   setPage(1);
-                  setScope(item.value);
+                  setScope(value);
                 }}
+                variant="fullWidth"
                 sx={{
-                  minHeight: 36,
-                  px: 1.5,
-                  flexShrink: 0,
-                  borderRadius: 0,
-                  color: scope === item.value ? 'primary.main' : 'text.secondary',
-                  borderBottom: scope === item.value ? '2px solid' : '2px solid transparent',
-                  borderColor: scope === item.value ? 'primary.main' : 'transparent',
-                  '&:hover': { boxShadow: 'none', transform: 'none' },
+                  width: { xs: '100%', sm: 360 },
+                  minHeight: 42,
+                  p: 0.4,
+                  borderRadius: 1.75,
+                  border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
+                  bgcolor: (theme) => theme.custom.semantic.paperSoft,
+                  '& .MuiTabs-indicator': { display: 'none' },
+                  '& .MuiTab-root': {
+                    minHeight: 34,
+                    borderRadius: 1.25,
+                    textTransform: 'none',
+                    fontWeight: 800,
+                    color: 'text.secondary',
+                  },
+                  '& .Mui-selected': {
+                    color: 'primary.main',
+                    bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.18)' : '#FFFFFF',
+                    boxShadow: '0 1px 2px rgba(15,23,42,0.08)',
+                  },
                 }}
               >
-                {item.label}
-              </Button>
-              ))}
-            </Stack>
+                {requestScopes.map((item) => (
+                  <Tab key={item.value} value={item.value} label={item.label} />
+                ))}
+              </Tabs>
+            </Box>
           )}
-
-          <Stack direction="row" sx={{ px: 1.5, pt: 0.75, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, overflowX: 'auto', scrollbarWidth: 'thin' }}>
-            {savedViews.map((view) => (
-              <Button
-                key={view.label}
-                onClick={() => setFilter('status', view.status)}
-                sx={{
-                  minHeight: 36,
-                  px: 1.5,
-                  flexShrink: 0,
-                  borderRadius: 0,
-                  color: filters.status === view.status ? 'primary.main' : 'text.secondary',
-                  borderBottom: filters.status === view.status ? '2px solid' : '2px solid transparent',
-                  borderColor: filters.status === view.status ? 'primary.main' : 'transparent',
-                  '&:hover': { boxShadow: 'none', transform: 'none' },
-                }}
-              >
-                {view.label}
-              </Button>
-            ))}
-          </Stack>
 
           <Stack direction="row" spacing={1} sx={{ p: 1.25, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: (theme) => theme.custom.semantic.paperSoft, flexWrap: 'wrap' }}>
             <TextField label="Search" value={filters.search} onChange={(e) => setFilter('search', e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load()} sx={{ width: { xs: '100%', md: 280 } }} />
@@ -277,14 +291,12 @@ function CompactKpi({ label, value }) {
 
 function RequestTable({ rows, loading, sort, onSort, onOpen }) {
   const headers = [
-    ['request_number', 'ID', 88],
+    ['request_number', 'ID', 150],
     ['title', 'Title', 'auto'],
-    ['requester_name', 'Requester', 150],
-    ['priority', 'Priority', 100],
-    ['status', 'Status', 140],
-    ['progress_percentage', 'Progress', 110],
-    ['current_assignee_name', 'Reported To', 150],
-    ['updated_at', 'Updated', 96],
+    ['requester_name', 'Requester', 180],
+    ['priority', 'Priority', 120],
+    ['status', 'Status', 170],
+    ['progress_percentage', 'Progress', 140],
   ];
 
   return (
@@ -302,8 +314,8 @@ function RequestTable({ rows, loading, sort, onSort, onOpen }) {
           </Stack>
         )}
       </Box>
-      <TableContainer sx={{ display: { xs: 'none', md: 'block' }, maxHeight: { md: 'calc(100vh - 310px)' }, minHeight: { md: 440 }, overflowX: 'auto' }}>
-        <Table stickyHeader size="small" sx={{ tableLayout: 'fixed', width: '100%', minWidth: 980 }}>
+      <TableContainer sx={{ display: { xs: 'none', md: 'block' }, maxHeight: { md: 'calc(100vh - 310px)' }, minHeight: { md: 440 } }}>
+        <Table stickyHeader size="small" sx={{ tableLayout: 'fixed', width: '100%', minWidth: 860 }}>
           <TableHead>
             <TableRow>
               {headers.map(([key, label, width]) => (
@@ -326,7 +338,9 @@ function RequestTable({ rows, loading, sort, onSort, onOpen }) {
                 sx={{ cursor: 'pointer', '&:hover': { bgcolor: (theme) => theme.custom.semantic.paperSoft } }}
               >
                 <TableCell>
-                  <Button component={Link} to={`/requests/${row.id}`} title={row.request_number} sx={{ px: 0, justifyContent: 'flex-start', fontWeight: 800 }}>{shortRequestNumber(row.request_number)}</Button>
+                  <Button component={Link} to={`/requests/${row.id}`} title={row.request_number} sx={{ px: 0, justifyContent: 'flex-start', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                    {row.request_number}
+                  </Button>
                 </TableCell>
                 <TableCell>
                   <Typography fontWeight={750} noWrap title={row.title}>{row.title}</Typography>
@@ -340,15 +354,6 @@ function RequestTable({ rows, loading, sort, onSort, onOpen }) {
                 <TableCell><StatusBadge value={row.priority} /></TableCell>
                 <TableCell><StatusBadge value={row.status} /></TableCell>
                 <TableCell><ProgressCell value={row.progress_percentage} status={row.status} /></TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-                    <Avatar sx={{ width: 26, height: 26, fontSize: 12, bgcolor: '#DBEAFE', color: 'primary.main', fontWeight: 800, flexShrink: 0 }}>
-                    {(getReportedToName(row) || '?')[0]}
-                    </Avatar>
-                    <Typography variant="body2" noWrap>{getReportedToName(row)}</Typography>
-                  </Stack>
-                </TableCell>
-                <TableCell>{relativeTime(row.updated_at)}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -377,7 +382,9 @@ function RequestMobileCard({ row, onOpen }) {
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="caption" color="primary.main" fontWeight={850}>{shortRequestNumber(row.request_number)}</Typography>
             <Typography fontWeight={850} sx={{ overflowWrap: 'anywhere' }}>{row.title}</Typography>
-            <Typography variant="caption" color="text.secondary">{formatEnum(row.request_type)}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {row.requester_name || 'Requester unavailable'} · {formatEnum(row.request_type)}
+            </Typography>
           </Box>
           <StatusBadge value={row.priority} />
         </Stack>
@@ -386,21 +393,9 @@ function RequestMobileCard({ row, onOpen }) {
           <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>Updated {relativeTime(row.updated_at)}</Typography>
         </Stack>
         <ProgressCell value={row.progress_percentage} status={row.status} />
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-          <Avatar sx={{ width: 26, height: 26, fontSize: 12, bgcolor: '#DBEAFE', color: 'primary.main', fontWeight: 800 }}>
-            {(getReportedToName(row) || '?')[0]}
-          </Avatar>
-          <Typography variant="body2" color="text.secondary" noWrap>
-            Reported To: {getReportedToName(row)}
-          </Typography>
-        </Stack>
       </Stack>
     </Box>
   );
-}
-
-function getReportedToName(row) {
-  return row?.reported_to_name || row?.department_head_name || missingReportingAuthorityText;
 }
 
 function ProgressCell({ value, status }) {

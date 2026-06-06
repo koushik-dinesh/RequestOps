@@ -1,0 +1,117 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db, rows
+from app.middleware.auth import get_current_user
+from app.utils.http import ApiError, ok
+
+
+router = APIRouter(prefix="/developer-workload", tags=["developer-workload"], dependencies=[Depends(get_current_user)])
+
+ALLOWED_ROLES = {"SYSTEM_ADMIN", "IT_HEAD", "PROJECT_MANAGER", "DEVELOPER", "QA"}
+ACTIVE_WORK_STATUSES = [
+    "ASSIGNED",
+    "IN_DEVELOPMENT",
+    "DEVELOPMENT_COMPLETE",
+    "IN_TESTING",
+    "TEST_FAILED",
+    "UAT_PENDING",
+    "UAT_REJECTED",
+]
+WORKLOAD_THRESHOLDS = {
+    "availableMax": 3,
+    "moderateMax": 6,
+}
+
+
+def workload_status(active_count: int) -> str:
+    if active_count <= WORKLOAD_THRESHOLDS["availableMax"]:
+        return "AVAILABLE"
+    if active_count <= WORKLOAD_THRESHOLDS["moderateMax"]:
+        return "MODERATE"
+    return "OVERLOADED"
+
+
+def active_status_sql() -> str:
+    return ", ".join(f"'{status}'" for status in ACTIVE_WORK_STATUSES)
+
+
+@router.get("/")
+def list_developer_workload(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user["role_code"] not in ALLOWED_ROLES:
+        raise ApiError(403, "You do not have access to Developer Workload.")
+
+    developers = rows(db, f"""
+        SELECT
+            u.id,
+            u.employee_id,
+            u.full_name,
+            u.email,
+            u.department_id,
+            d.name AS department_name,
+            COUNT(DISTINCT r.id) AS active_request_count,
+            SUM(CASE WHEN r.status = 'IN_DEVELOPMENT' THEN 1 ELSE 0 END) AS in_development_count,
+            SUM(CASE WHEN r.status IN ('IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS in_testing_count,
+            SUM(CASE WHEN r.status IN ('DEVELOPMENT_COMPLETE', 'IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS qa_pending_count
+        FROM users u
+        JOIN roles role ON role.id = u.role_id
+        LEFT JOIN departments d ON d.id = u.department_id
+        LEFT JOIN assignments a ON a.developer_user_id = u.id AND a.is_active = TRUE
+        LEFT JOIN requests r ON r.id = a.request_id AND r.status IN ({active_status_sql()})
+        WHERE role.code = 'DEVELOPER' AND u.status = 'ACTIVE'
+        GROUP BY u.id, u.employee_id, u.full_name, u.email, u.department_id, d.name
+        ORDER BY active_request_count DESC, u.full_name
+    """)
+
+    developer_ids = [row["id"] for row in developers]
+    assignment_rows = rows(db, f"""
+        SELECT
+            a.developer_user_id,
+            a.assigned_at,
+            r.id AS request_id,
+            r.request_number,
+            r.title,
+            r.status,
+            r.priority,
+            r.updated_at,
+            qa.full_name AS qa_name
+        FROM assignments a
+        JOIN requests r ON r.id = a.request_id
+        LEFT JOIN users qa ON qa.id = a.qa_user_id
+        WHERE a.is_active = TRUE
+          AND r.status IN ({active_status_sql()})
+        ORDER BY a.assigned_at DESC, r.updated_at DESC
+    """) if developer_ids else []
+
+    assignments_by_developer: dict[int, list[dict]] = {}
+    for assignment in assignment_rows:
+        assignments_by_developer.setdefault(int(assignment["developer_user_id"]), []).append(assignment)
+
+    rows_with_status = []
+    for developer in developers:
+        active_count = int(developer.get("active_request_count") or 0)
+        status = workload_status(active_count)
+        rows_with_status.append({
+            **developer,
+            "active_request_count": active_count,
+            "in_development_count": int(developer.get("in_development_count") or 0),
+            "in_testing_count": int(developer.get("in_testing_count") or 0),
+            "qa_pending_count": int(developer.get("qa_pending_count") or 0),
+            "workload_status": status,
+            "assignments": assignments_by_developer.get(int(developer["id"]), []),
+        })
+
+    summary = {
+        "totalDevelopers": len(rows_with_status),
+        "available": sum(1 for item in rows_with_status if item["workload_status"] == "AVAILABLE"),
+        "moderate": sum(1 for item in rows_with_status if item["workload_status"] == "MODERATE"),
+        "overloaded": sum(1 for item in rows_with_status if item["workload_status"] == "OVERLOADED"),
+        "activeAssignedRequests": sum(item["active_request_count"] for item in rows_with_status),
+    }
+
+    return ok({
+        "thresholds": WORKLOAD_THRESHOLDS,
+        "activeStatuses": ACTIVE_WORK_STATUSES,
+        "summary": summary,
+        "developers": rows_with_status,
+    })

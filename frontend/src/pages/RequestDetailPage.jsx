@@ -6,8 +6,10 @@ import {
   Button,
   Chip,
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   Grid,
   IconButton,
   LinearProgress,
@@ -27,12 +29,14 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { CheckCircle2, CircleHelp, PauseCircle, PlayCircle, Send, XCircle } from 'lucide-react';
+import jsPDF from 'jspdf';
 import { useParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import StatusBadge from '../components/StatusBadge';
 import { PageSkeleton } from '../components/LoadingState';
 import { Page } from '../components/LayoutPrimitives';
+import PageHeader from '../components/PageHeader';
 import { formatEnum, missingReportingAuthorityText, priorities } from '../utils/constants';
 
 const workflowSteps = [
@@ -48,6 +52,57 @@ const workflowSteps = [
 ];
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api/v1';
+
+const progressVisibleStatuses = new Set([
+  'ASSIGNED',
+  'IN_DEVELOPMENT',
+  'DEVELOPMENT_COMPLETE',
+  'IN_TESTING',
+  'TEST_FAILED',
+  'UAT_PENDING',
+  'UAT_APPROVED',
+  'UAT_REJECTED',
+  'DEPLOYED',
+  'CLOSED',
+]);
+
+const workflowSuccessMessages = {
+  '/department-approval/approve': 'Request approved successfully.',
+  '/department-approval/reject': 'Request rejected successfully.',
+  '/department-approval/request-clarification': 'Clarification requested successfully.',
+  '/clarification/respond': 'Clarification response submitted successfully.',
+  '/it-review/approve': 'Request approved successfully.',
+  '/it-review/reject': 'Request rejected successfully.',
+  '/it-review/request-clarification': 'Clarification requested successfully.',
+  '/it-review/defer': 'Request deferred successfully.',
+  '/assign': 'Developer assigned successfully.',
+  '/development/start': 'Request moved to Development.',
+  '/development/update': 'Development progress updated successfully.',
+  '/development/complete': 'Development completed successfully.',
+  '/testing/result': 'Testing result submitted successfully.',
+  '/testing/request-clarification': 'Clarification requested successfully.',
+  '/uat/approve': 'Request approved successfully.',
+  '/uat/reject': 'Request rejected successfully.',
+  '/uat/request-clarification': 'Clarification requested successfully.',
+};
+
+const notificationActionPaths = new Set([
+  '/department-approval/approve',
+  '/department-approval/reject',
+  '/department-approval/request-clarification',
+  '/clarification/respond',
+  '/it-review/approve',
+  '/it-review/reject',
+  '/it-review/request-clarification',
+  '/assign',
+  '/development/update',
+  '/development/complete',
+  '/testing/result',
+  '/testing/request-clarification',
+  '/uat/approve',
+  '/uat/reject',
+  '/uat/request-clarification',
+]);
 
 const clarificationReasons = [
   { value: 'MISSING_BUSINESS_JUSTIFICATION', label: 'Missing Business Justification' },
@@ -77,9 +132,61 @@ function formatDateTime(value) {
   return new Intl.DateTimeFormat('en-IN', {
     day: '2-digit',
     month: 'short',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function formatFullDateTime(value) {
+  if (!value) return 'Not available';
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function hasDevelopmentVisibility(request) {
+  return Boolean(request?.active_assignment_id || progressVisibleStatuses.has(request?.status));
+}
+
+function normalizeRoiFromRequest(request) {
+  return {
+    roiType: request?.roi_type || '',
+    roiHoursSavedPerEmployeePerMonth: request?.roi_hours_saved_per_employee_per_month ?? '',
+    roiEmployeesBenefited: request?.roi_employees_benefited ?? '',
+    roiMonthlyCostSavingsInr: request?.roi_monthly_cost_savings_inr ?? '',
+  };
+}
+
+function calculateRoi(values) {
+  if (values.roiType === 'TIME_SAVINGS') {
+    const monthly = Number(values.roiHoursSavedPerEmployeePerMonth || 0) * Number(values.roiEmployeesBenefited || 0);
+    return {
+      typeLabel: 'Time Savings',
+      inputLabel: `${Number(values.roiHoursSavedPerEmployeePerMonth || 0).toLocaleString('en-IN')} hours x ${Number(values.roiEmployeesBenefited || 0).toLocaleString('en-IN')} employees`,
+      monthlyLabel: `${monthly.toLocaleString('en-IN')} productive hours/month`,
+      annualLabel: `${(monthly * 12).toLocaleString('en-IN')} productive hours/year`,
+    };
+  }
+  if (values.roiType === 'COST_SAVINGS') {
+    const monthly = Number(values.roiMonthlyCostSavingsInr || 0);
+    return {
+      typeLabel: 'Cost Savings',
+      inputLabel: `₹${monthly.toLocaleString('en-IN')} per month`,
+      monthlyLabel: `₹${monthly.toLocaleString('en-IN')} monthly savings`,
+      annualLabel: `₹${(monthly * 12).toLocaleString('en-IN')} annual savings`,
+    };
+  }
+  return {
+    typeLabel: 'Not specified',
+    inputLabel: 'No ROI information has been provided.',
+    monthlyLabel: 'Not available',
+    annualLabel: 'Not available',
+  };
 }
 
 function daysBetween(value) {
@@ -123,6 +230,14 @@ function getProgressStatusLabel(value = 0) {
   return 'Not Started';
 }
 
+function workloadStatusLabel(value) {
+  return {
+    AVAILABLE: 'Available',
+    MODERATE: 'Moderate',
+    OVERLOADED: 'Overloaded',
+  }[value] || 'Available';
+}
+
 function progressBarColor(value = 0) {
   const progress = Number(value || 0);
   if (progress >= 100) return 'success';
@@ -147,6 +262,7 @@ export default function RequestDetailPage() {
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [users, setUsers] = useState([]);
+  const [developerWorkloads, setDeveloperWorkloads] = useState([]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [comment, setComment] = useState('');
@@ -160,8 +276,12 @@ export default function RequestDetailPage() {
   const [clarificationForm, setClarificationForm] = useState({ reasonCategory: 'MISSING_REQUIREMENTS', note: '' });
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [detailsForm, setDetailsForm] = useState({ title: '', businessJustification: '', description: '', expectedBenefits: '' });
+  const [roiEditing, setRoiEditing] = useState(false);
+  const [roiForm, setRoiForm] = useState(normalizeRoiFromRequest(null));
+  const [reportOpen, setReportOpen] = useState(false);
 
   const developers = useMemo(() => users.filter((row) => row.status === 'ACTIVE' && row.role_code === 'DEVELOPER'), [users]);
+  const workloadByDeveloper = useMemo(() => new Map(developerWorkloads.map((item) => [Number(item.id), item])), [developerWorkloads]);
   const qaUsers = useMemo(() => users.filter((row) => row.status === 'ACTIVE' && row.role_code === 'QA'), [users]);
   const currentStep = useMemo(() => getCurrentWorkflowStep(request?.status), [request?.status]);
   const stageStartedAt = useMemo(
@@ -175,6 +295,11 @@ export default function RequestDetailPage() {
   const latestRequesterUpdate = useMemo(() => clarifications
     .filter((item) => item.status === 'RESOLVED' && item.response_note)
     .sort((a, b) => new Date(b.responded_at || 0) - new Date(a.responded_at || 0))[0], [clarifications]);
+  const showWorkflowProgress = useMemo(() => hasDevelopmentVisibility(request), [request]);
+  const canEditRoi = useMemo(() => {
+    if (!request) return false;
+    return user?.roleCode === 'SYSTEM_ADMIN' || (user?.roleCode === 'DEPARTMENT_HEAD' && Number(request.reported_to_user_id || request.department_head_user_id) === Number(user?.id));
+  }, [request, user]);
 
   async function load() {
     const [detail, history, requestComments, requestClarifications, requestProgressUpdates, requestAttachments] = await Promise.all([
@@ -191,14 +316,17 @@ export default function RequestDetailPage() {
     setClarifications(requestClarifications);
     setProgressUpdates(requestProgressUpdates);
     setAttachments(requestAttachments);
+    setRoiForm(normalizeRoiFromRequest(detail));
   }
 
   useEffect(() => {
     load().catch((err) => setError(err.message));
-    if (['SYSTEM_ADMIN', 'IT_HEAD'].includes(user?.roleCode)) {
+    if (['SYSTEM_ADMIN', 'IT_HEAD', 'PROJECT_MANAGER'].includes(user?.roleCode)) {
       api.get('/users').then(setUsers).catch(() => setUsers([]));
+      api.get('/developer-workload').then((result) => setDeveloperWorkloads(result.developers || [])).catch(() => setDeveloperWorkloads([]));
     } else {
       setUsers([]);
+      setDeveloperWorkloads([]);
     }
   }, [id, user?.roleCode]);
 
@@ -206,8 +334,13 @@ export default function RequestDetailPage() {
     setError('');
     setMessage('');
     try {
-      await api.post(`/requests/${id}${path}`, payload);
-      setMessage(successMessage);
+      const result = await api.post(`/requests/${id}${path}`, payload);
+      setMessage(successMessage === 'Action completed.' ? workflowSuccessMessages[path] || successMessage : successMessage);
+      if (result?.notificationEmails?.length) {
+        window.setTimeout(() => setMessage(`Email dispatched to ${result.notificationEmails[0]}`), 650);
+      } else if (notificationActionPaths.has(path)) {
+        window.setTimeout(() => setMessage('Notification email dispatched successfully.'), 650);
+      }
       setActionComment('');
       await load();
     } catch (err) {
@@ -218,7 +351,7 @@ export default function RequestDetailPage() {
   async function addComment(event) {
     event.preventDefault();
     if (!comment.trim()) return;
-    await runAction('/comments', { commentText: comment, commentType: 'GENERAL' });
+    await runAction('/comments', { commentText: comment, commentType: 'GENERAL' }, 'Comment added successfully.');
     setComment('');
   }
 
@@ -281,6 +414,31 @@ export default function RequestDetailPage() {
     }
   }
 
+  async function submitRoiUpdate(event) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    try {
+      await api.post(`/requests/${id}/roi`, {
+        roiType: roiForm.roiType || null,
+        roiHoursSavedPerEmployeePerMonth: roiForm.roiType === 'TIME_SAVINGS' ? Number(roiForm.roiHoursSavedPerEmployeePerMonth || 0) : null,
+        roiEmployeesBenefited: roiForm.roiType === 'TIME_SAVINGS' ? Number(roiForm.roiEmployeesBenefited || 0) : null,
+        roiMonthlyCostSavingsInr: roiForm.roiType === 'COST_SAVINGS' ? Number(roiForm.roiMonthlyCostSavingsInr || 0) : null,
+      });
+      setMessage('ROI information updated successfully.');
+      setRoiEditing(false);
+      await load();
+      window.setTimeout(() => setMessage('Notification email dispatched successfully.'), 650);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function openReport() {
+    setReportOpen(true);
+    api.post(`/requests/${id}/report/audit`).catch(() => {});
+  }
+
   if (!request) return <PageSkeleton />;
 
   return (
@@ -305,99 +463,87 @@ export default function RequestDetailPage() {
       </Snackbar>
       {error && <Alert severity="error">{error}</Alert>}
 
-      <WorkItemHeader request={request} />
+      <WorkItemHeader request={request} onViewReport={openReport} />
 
-      <Grid container spacing={2.5} sx={{ alignItems: 'flex-start' }}>
-        <Grid size={{ xs: 12, lg: 8.4 }} sx={{ order: { xs: 2, lg: 1 } }}>
-          <Stack spacing={2}>
-            <WorkspacePanel title="Request Information">
-              <Grid container spacing={0}>
-                <MetaItem label="Requester" value={request.requester_name} />
-                <MetaItem label="Department" value={request.department_name} />
-                <MetaItem label="Type" value={formatEnum(request.request_type)} />
-                <MetaItem label="Priority" value={<StatusBadge value={request.priority} />} />
-                <MetaItem label="Reported To" value={getReportedToName(request)} />
-                <MetaItem label="Created" value={formatDate(request.created_at)} />
-                <MetaItem label="Updated" value={formatDate(request.updated_at)} />
-                <MetaItem label="Full ID" value={request.request_number} />
-              </Grid>
-            </WorkspacePanel>
+      <Box
+        sx={{
+          display: 'grid',
+          gap: 2.5,
+          gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 8.4fr) minmax(320px, 3.6fr)' },
+          alignItems: 'flex-start',
+        }}
+      >
+        <Box sx={{ order: { xs: 1, lg: 1 }, gridColumn: { lg: '1 / 2' } }}>
+          <WorkspacePanel title="Request Information">
+            <Grid container spacing={0}>
+              <MetaItem label="Requester" value={request.requester_name} />
+              <MetaItem label="Department" value={request.department_name} />
+              <MetaItem label="Type" value={formatEnum(request.request_type)} />
+              <MetaItem label="Priority" value={<StatusBadge value={request.priority} />} />
+              <MetaItem label="Reported To" value={getReportedToName(request)} />
+              <MetaItem label="Created" value={formatDate(request.created_at)} />
+              <MetaItem label="Updated" value={formatDate(request.updated_at)} />
+              <MetaItem label="Full ID" value={request.request_number} />
+            </Grid>
+          </WorkspacePanel>
+        </Box>
 
-            <WorkspacePanel title="Business Context">
-              <Stack spacing={2.25}>
-                {request.status === 'CLARIFICATION_REQUESTED' && openClarification && (
-                  <ClarificationRequestCard
-                    clarification={openClarification}
-                    canUpdate={request.requester_user_id === user?.id || user?.roleCode === 'SYSTEM_ADMIN'}
-                    onUpdate={openDetailsDialog}
-                  />
-                )}
-                <TextBlock label="Business Justification" value={request.business_justification} />
-                <TextBlock label="Description" value={request.description} />
-                <TextBlock label="Expected Benefits" value={request.expected_benefits || 'Not provided'} />
-              </Stack>
-            </WorkspacePanel>
-
-            <DevelopmentProgressPanel request={request} progressUpdates={progressUpdates} />
-
-            <WorkspacePanel title="Comments" caption={`${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}>
-              <Stack component="form" direction={{ xs: 'column', md: 'row' }} spacing={1.25} onSubmit={addComment}>
-                <Avatar sx={{ width: 34, height: 34, bgcolor: 'primary.main', fontSize: 13, fontWeight: 850 }}>
-                  {user?.fullName?.[0] || user?.email?.[0] || '?'}
-                </Avatar>
-                <TextField
-                  label="Add a comment"
-                  value={comment}
-                  onChange={(event) => setComment(event.target.value)}
-                  multiline
-                  minRows={2}
-                  fullWidth
+        <Box sx={{ order: { xs: 2, lg: 2 }, gridColumn: { lg: '1 / 2' } }}>
+          <WorkspacePanel title="Business Context">
+            <Stack spacing={2.25}>
+              {request.status === 'CLARIFICATION_REQUESTED' && openClarification && (
+                <ClarificationRequestCard
+                  clarification={openClarification}
+                  canUpdate={request.requester_user_id === user?.id || user?.roleCode === 'SYSTEM_ADMIN'}
+                  onUpdate={openDetailsDialog}
                 />
-                <Button type="submit" variant="contained" sx={{ alignSelf: { md: 'flex-start' } }}>Post</Button>
-              </Stack>
-
-              <Stack spacing={1.5} sx={{ mt: 2 }}>
-                {comments.length === 0 ? (
-                  <EmptyInline message="No comments yet. Start the discussion with the next action or update." />
-                ) : comments.map((item) => (
-                  <CommentItem key={item.id} comment={item} />
-                ))}
-              </Stack>
-            </WorkspacePanel>
-
-            <WorkspacePanel
-              title="Attachments"
-              caption={`${attachments.length} ${attachments.length === 1 ? 'file' : 'files'}`}
-              action={(
-                <Button variant="outlined" component="label" size="small" startIcon={<UploadFileIcon />}>
-                  Upload
-                  <input hidden type="file" onChange={uploadAttachment} />
-                </Button>
               )}
-            >
-              {attachments.length === 0 ? (
-                <EmptyInline message="No attachments uploaded yet." />
-              ) : (
-                <Grid container spacing={1.25}>
-                  {attachments.map((attachment) => (
-                    <Grid key={attachment.id} size={{ xs: 12, md: 6 }}>
-                      <AttachmentCard attachment={attachment} requestId={id} onPreview={setPreviewAttachment} />
-                    </Grid>
-                  ))}
-                </Grid>
-              )}
-            </WorkspacePanel>
-          </Stack>
-        </Grid>
+              <TextBlock label="Business Justification" value={request.business_justification} />
+              <TextBlock label="Description" value={request.description} />
+              <TextBlock label="Expected Benefits" value={request.expected_benefits || 'Not provided'} />
+            </Stack>
+          </WorkspacePanel>
+        </Box>
 
-        <Grid size={{ xs: 12, lg: 3.6 }} sx={{ order: { xs: 1, lg: 2 } }}>
-          <Stack
-            spacing={2}
-            sx={{
-              minWidth: 0,
-              pr: { lg: 0.25 },
-            }}
+        <Box sx={{ order: { xs: 3, lg: 3 }, gridColumn: { lg: '1 / 2' } }}>
+          <RoiInformationPanel
+            request={request}
+            canEdit={canEditRoi}
+            editing={roiEditing}
+            setEditing={setRoiEditing}
+            form={roiForm}
+            setForm={setRoiForm}
+            onSubmit={submitRoiUpdate}
+          />
+        </Box>
+
+        <Box sx={{ order: { xs: 4, lg: 4 }, gridColumn: { lg: '1 / 2' } }}>
+          <WorkspacePanel
+            title="Attachments"
+            caption={`${attachments.length} ${attachments.length === 1 ? 'file' : 'files'}`}
+            action={(
+              <Button variant="outlined" component="label" size="small" startIcon={<UploadFileIcon />}>
+                Upload
+                <input hidden type="file" onChange={uploadAttachment} />
+              </Button>
+            )}
           >
+            {attachments.length === 0 ? (
+              <EmptyInline message="No attachments uploaded yet." />
+            ) : (
+              <Grid container spacing={1.25}>
+                {attachments.map((attachment) => (
+                  <Grid key={attachment.id} size={{ xs: 12, md: 6 }}>
+                    <AttachmentCard attachment={attachment} requestId={id} onPreview={setPreviewAttachment} />
+                  </Grid>
+                ))}
+              </Grid>
+            )}
+          </WorkspacePanel>
+        </Box>
+
+        <Box sx={{ order: { xs: 5, lg: 1 }, gridColumn: { lg: '2 / 3' }, gridRow: { lg: '1 / span 6' } }}>
+          <Stack spacing={2} sx={{ minWidth: 0, pr: { lg: 0.25 }, position: { lg: 'sticky' }, top: { lg: 82 } }}>
             <CurrentStageCard
               currentStep={currentStep}
               owner={getReportedToName(request)}
@@ -416,6 +562,7 @@ export default function RequestDetailPage() {
               assignment={assignment}
               setAssignment={setAssignment}
               developers={developers}
+              workloadByDeveloper={workloadByDeveloper}
               qaUsers={qaUsers}
               progress={progress}
               setProgress={setProgress}
@@ -427,12 +574,52 @@ export default function RequestDetailPage() {
               attachments={attachments}
             />
 
-            <WorkflowTimeline status={request.status} timeline={timeline} />
-
-            <RecentActivity items={recentActivity} clarifications={clarifications} />
           </Stack>
-        </Grid>
-      </Grid>
+        </Box>
+
+        <Box sx={{ order: { xs: 6, lg: 5 }, gridColumn: { lg: '1 / 2' } }}>
+          <WorkspacePanel title="Comments" caption={`${comments.length} ${comments.length === 1 ? 'comment' : 'comments'}`}>
+            <Stack component="form" direction={{ xs: 'column', md: 'row' }} spacing={1.25} onSubmit={addComment}>
+              <Avatar sx={{ width: 34, height: 34, bgcolor: 'primary.main', fontSize: 13, fontWeight: 850 }}>
+                {user?.fullName?.[0] || user?.email?.[0] || '?'}
+              </Avatar>
+              <TextField
+                label="Add a comment"
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                multiline
+                minRows={2}
+                fullWidth
+              />
+              <Button type="submit" variant="contained" sx={{ alignSelf: { md: 'flex-start' } }}>Post</Button>
+            </Stack>
+
+            <Stack spacing={1.5} sx={{ mt: 2 }}>
+              {comments.length === 0 ? (
+                <EmptyInline message="No comments yet. Start the discussion with the next action or update." />
+              ) : comments.map((item) => (
+                <CommentItem key={item.id} comment={item} />
+              ))}
+            </Stack>
+          </WorkspacePanel>
+        </Box>
+
+        {showWorkflowProgress && (
+          <Box sx={{ order: { xs: 7, lg: 2 }, gridColumn: { lg: '2 / 3' } }}>
+            <WorkflowTimeline status={request.status} timeline={timeline} />
+          </Box>
+        )}
+
+        {showWorkflowProgress && (
+          <Box sx={{ order: { xs: 8, lg: 6 }, gridColumn: { lg: '1 / 2' } }}>
+            <DevelopmentProgressPanel request={request} progressUpdates={progressUpdates} />
+          </Box>
+        )}
+
+        <Box sx={{ order: { xs: 9, lg: 3 }, gridColumn: { lg: '2 / 3' } }}>
+          <RecentActivity items={recentActivity} clarifications={clarifications} />
+        </Box>
+      </Box>
 
       <AttachmentPreviewDialog
         attachment={previewAttachment}
@@ -456,28 +643,31 @@ export default function RequestDetailPage() {
         onSubmit={submitDetailsUpdate}
         fullScreen={isMobileLayout}
       />
+      <RequestReportDialog
+        open={reportOpen}
+        request={request}
+        attachments={attachments}
+        timeline={timeline}
+        comments={comments}
+        progressUpdates={progressUpdates}
+        onClose={() => setReportOpen(false)}
+        fullScreen={isMobileLayout}
+      />
     </Page>
   );
 }
 
-function WorkItemHeader({ request }) {
+function WorkItemHeader({ request, onViewReport }) {
   async function copyRequestNumber() {
     await navigator.clipboard?.writeText(request.request_number);
   }
 
   return (
-    <Box
-      sx={{
-        borderRadius: 2.5,
-        border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
-        bgcolor: (theme) => theme.custom.semantic.elevated,
-        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
-        px: { xs: 2, md: 2.5 },
-        py: { xs: 1.75, md: 2 },
-      }}
-    >
-      <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', lg: 'center' } }}>
-        <Box sx={{ minWidth: 0 }}>
+    <PageHeader
+      eyebrow="REQUEST DETAILS"
+      title={request.title}
+      description={(
+        <Stack spacing={0.8}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.8, flexWrap: 'wrap' }}>
             <Tooltip title={request.request_number}>
               <Typography variant="caption" color="primary.main" fontWeight={900}>
@@ -492,19 +682,22 @@ function WorkItemHeader({ request }) {
             <StatusBadge value={request.status} />
             <StatusBadge value={request.priority} />
           </Stack>
-          <Typography variant="h4" sx={{ fontSize: { xs: 24, md: 30 }, lineHeight: 1.15, overflowWrap: 'anywhere' }}>
-            {request.title}
-          </Typography>
-        </Box>
-
-        <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', lg: 'flex-end' } }}>
-          <HeaderMeta label="Requester" value={request.requester_name} />
-          <HeaderMeta label="Department" value={request.department_name} />
-          <HeaderMeta label="Created" value={formatDate(request.created_at)} />
-          <HeaderMeta label="Updated" value={formatDate(request.updated_at)} />
         </Stack>
-      </Stack>
-    </Box>
+      )}
+      actions={(
+        <Stack spacing={1.25} sx={{ alignItems: { xs: 'stretch', lg: 'flex-end' }, width: { xs: '100%', lg: 'auto' } }}>
+          <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', lg: 'flex-end' } }}>
+            <HeaderMeta label="Requester" value={request.requester_name} />
+            <HeaderMeta label="Department" value={request.department_name} />
+            <HeaderMeta label="Created" value={formatDate(request.created_at)} />
+            <HeaderMeta label="Updated" value={formatDate(request.updated_at)} />
+          </Stack>
+          <Button variant="outlined" size="small" onClick={onViewReport} sx={{ alignSelf: { xs: 'flex-start', lg: 'flex-end' } }}>
+            View As Report
+          </Button>
+        </Stack>
+      )}
+    />
   );
 }
 
@@ -551,18 +744,20 @@ function WorkspacePanel({ title, caption, action, children }) {
   );
 }
 
-function SidebarPanel({ title, children }) {
+function SidebarPanel({ title, children, emphasized = false }) {
   return (
     <Box
       sx={{
         borderRadius: 2.25,
-        border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
-        bgcolor: (theme) => theme.custom.semantic.elevated,
-        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+        border: (theme) => `1px solid ${emphasized ? theme.palette.primary.main : theme.custom.semantic.borderSoft}`,
+        bgcolor: (theme) => emphasized
+          ? (theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.10)' : '#F8FBFF')
+          : theme.custom.semantic.elevated,
+        boxShadow: emphasized ? '0 14px 34px rgba(37,99,235,0.10)' : '0 1px 2px rgba(15,23,42,0.04)',
         overflow: 'hidden',
       }}
     >
-      <Box sx={{ px: 2, py: 1.35, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
+      <Box sx={{ px: 2, py: 1.35, borderBottom: (theme) => `1px solid ${emphasized ? 'rgba(37,99,235,0.22)' : theme.custom.semantic.borderSoft}`, bgcolor: (theme) => emphasized ? (theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.12)' : '#EFF6FF') : theme.custom.semantic.paperSoft }}>
         <Typography variant="subtitle2" fontWeight={850}>{title}</Typography>
       </Box>
       <Box sx={{ p: 2 }}>{children}</Box>
@@ -613,12 +808,14 @@ function WorkflowTimeline({ status, timeline }) {
         {workflowSteps.map((step, index) => {
           const active = step.matches.includes(status);
           const completed = index < currentIndex || (reachedStatuses.has(step.key) && !active);
+          const event = [...timeline].reverse().find((item) => step.matches.includes(item.to_status));
           return (
             <TimelineStep
               key={step.key}
               step={step}
               completed={completed}
               active={active}
+              event={event}
               isLast={index === workflowSteps.length - 1}
             />
           );
@@ -628,7 +825,7 @@ function WorkflowTimeline({ status, timeline }) {
   );
 }
 
-function TimelineStep({ step, completed, active, isLast }) {
+function TimelineStep({ step, completed, active, event, isLast }) {
   return (
     <Stack direction="row" spacing={1.2} sx={{ pb: isLast ? 0 : 1.4 }}>
       <Stack sx={{ alignItems: 'center', width: 26, flexShrink: 0 }}>
@@ -669,6 +866,16 @@ function TimelineStep({ step, completed, active, isLast }) {
           {step.label}
         </Typography>
         <Typography variant="caption" color="text.secondary">{step.description}</Typography>
+        {event && (
+          <Box sx={{ mt: 0.45 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.35 }}>
+              {formatFullDateTime(event.changed_at)}
+            </Typography>
+            <Typography variant="caption" color="text.primary" sx={{ display: 'block', lineHeight: 1.35, fontWeight: 760 }}>
+              {event.changed_by_name} {event.comment || formatEnum(event.to_status)}
+            </Typography>
+          </Box>
+        )}
       </Box>
     </Stack>
   );
@@ -693,6 +900,95 @@ function TextBlock({ label, value }) {
       <Typography variant="subtitle2" color="text.secondary">{label}</Typography>
       <Typography variant="body2" sx={{ mt: 0.55, lineHeight: 1.7, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</Typography>
     </Box>
+  );
+}
+
+function RoiInformationPanel({ request, canEdit, editing, setEditing, form, setForm, onSubmit }) {
+  const roiValues = editing ? form : normalizeRoiFromRequest(request);
+  const roi = calculateRoi(roiValues);
+
+  return (
+    <WorkspacePanel
+      title="ROI Information"
+      caption="Business value captured for approval and management reporting"
+      action={canEdit && !editing ? <Button size="small" variant="outlined" onClick={() => setEditing(true)}>Edit ROI</Button> : null}
+    >
+      {editing ? (
+        <Stack component="form" spacing={1.5} onSubmit={onSubmit}>
+          <Grid container spacing={1.5}>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                select
+                label="ROI Type"
+                value={form.roiType}
+                onChange={(event) => setForm((current) => ({ ...current, roiType: event.target.value }))}
+                fullWidth
+              >
+                <MenuItem value="">Not specified</MenuItem>
+                <MenuItem value="TIME_SAVINGS">Time Savings</MenuItem>
+                <MenuItem value="COST_SAVINGS">Cost Savings</MenuItem>
+              </TextField>
+            </Grid>
+            {form.roiType === 'TIME_SAVINGS' && (
+              <>
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <TextField
+                    label="Hours Saved Per Employee Per Month"
+                    type="number"
+                    value={form.roiHoursSavedPerEmployeePerMonth}
+                    onChange={(event) => setForm((current) => ({ ...current, roiHoursSavedPerEmployeePerMonth: event.target.value }))}
+                    fullWidth
+                  />
+                </Grid>
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <TextField
+                    label="Employees Benefited"
+                    type="number"
+                    value={form.roiEmployeesBenefited}
+                    onChange={(event) => setForm((current) => ({ ...current, roiEmployeesBenefited: event.target.value }))}
+                    fullWidth
+                  />
+                </Grid>
+              </>
+            )}
+            {form.roiType === 'COST_SAVINGS' && (
+              <Grid size={{ xs: 12, md: 4 }}>
+                <TextField
+                  label="Monthly Cost Savings (INR)"
+                  type="number"
+                  value={form.roiMonthlyCostSavingsInr}
+                  onChange={(event) => setForm((current) => ({ ...current, roiMonthlyCostSavingsInr: event.target.value }))}
+                  fullWidth
+                />
+              </Grid>
+            )}
+          </Grid>
+          <Alert severity="info">{roi.annualLabel}</Alert>
+          <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end' }}>
+            <Button color="inherit" onClick={() => { setForm(normalizeRoiFromRequest(request)); setEditing(false); }}>Cancel</Button>
+            <Button type="submit" variant="contained">Save ROI</Button>
+          </Stack>
+        </Stack>
+      ) : (
+        <Grid container spacing={1.25}>
+          <RoiMetric label="ROI Type" value={roi.typeLabel} />
+          <RoiMetric label="Input Values" value={roi.inputLabel} />
+          <RoiMetric label="Monthly ROI" value={roi.monthlyLabel} />
+          <RoiMetric label="Calculated Annual ROI" value={roi.annualLabel} emphasis />
+        </Grid>
+      )}
+    </WorkspacePanel>
+  );
+}
+
+function RoiMetric({ label, value, emphasis = false }) {
+  return (
+    <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+      <Box sx={{ p: 1.4, borderRadius: 1.75, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: (theme) => emphasis ? (theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.14)' : '#EFF6FF') : theme.custom.semantic.paperSoft }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
+        <Typography variant="body2" fontWeight={emphasis ? 900 : 800} sx={{ mt: 0.35, overflowWrap: 'anywhere' }}>{value}</Typography>
+      </Box>
+    </Grid>
   );
 }
 
@@ -818,7 +1114,11 @@ function CommentItem({ comment }) {
 }
 
 function AttachmentCard({ attachment, requestId, onPreview }) {
-  const downloadUrl = `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/download?token=${localStorage.getItem('requestops.accessToken') || ''}`;
+  const token = encodeURIComponent(localStorage.getItem('requestops.accessToken') || '');
+  const previewUrl = `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/preview?token=${token}`;
+  const downloadUrl = `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/download?token=${token}`;
+  const mimeType = attachment.mime_type || '';
+  const isImage = mimeType.startsWith('image/');
 
   return (
     <Box
@@ -830,9 +1130,36 @@ function AttachmentCard({ attachment, requestId, onPreview }) {
       }}
     >
       <Stack direction="row" spacing={1.2} sx={{ alignItems: 'flex-start' }}>
-        <Box sx={{ width: 36, height: 36, borderRadius: 1.4, display: 'grid', placeItems: 'center', color: 'primary.main', bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.16)' : '#EFF6FF' }}>
-          <InsertDriveFileOutlinedIcon fontSize="small" />
-        </Box>
+        {isImage ? (
+          <Box
+            component="button"
+            type="button"
+            onClick={() => onPreview(attachment)}
+            sx={{
+              width: 72,
+              height: 54,
+              p: 0,
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1.5,
+              overflow: 'hidden',
+              bgcolor: (theme) => theme.custom.semantic.paperSoft,
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <Box
+              component="img"
+              src={previewUrl}
+              alt={attachment.original_file_name}
+              sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+            />
+          </Box>
+        ) : (
+          <Box sx={{ width: 36, height: 36, borderRadius: 1.4, display: 'grid', placeItems: 'center', color: 'primary.main', bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.16)' : '#EFF6FF', flexShrink: 0 }}>
+            <InsertDriveFileOutlinedIcon fontSize="small" />
+          </Box>
+        )}
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography variant="body2" fontWeight={850} noWrap>{attachment.original_file_name}</Typography>
           <Typography variant="caption" color="text.secondary">
@@ -849,15 +1176,55 @@ function AttachmentCard({ attachment, requestId, onPreview }) {
 }
 
 function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = false }) {
-  const token = localStorage.getItem('requestops.accessToken') || '';
+  const token = encodeURIComponent(localStorage.getItem('requestops.accessToken') || '');
+  const rawToken = localStorage.getItem('requestops.accessToken') || '';
   const previewUrl = attachment
-    ? `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/preview?token=${token}`
+    ? `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/preview`
     : '';
   const downloadUrl = attachment
     ? `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/download?token=${token}`
     : '';
   const mimeType = attachment?.mime_type || '';
   const canPreview = mimeType.startsWith('image/') || mimeType === 'application/pdf';
+  const [objectUrl, setObjectUrl] = useState('');
+  const [previewError, setPreviewError] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  useEffect(() => {
+    let revoked = false;
+    let nextObjectUrl = '';
+
+    async function loadPreview() {
+      setObjectUrl('');
+      setPreviewError('');
+
+      if (!attachment || !canPreview) return;
+
+      setPreviewLoading(true);
+      try {
+        const response = await fetch(previewUrl, {
+          headers: rawToken ? { Authorization: `Bearer ${rawToken}` } : {},
+        });
+        if (!response.ok) {
+          throw new Error(`Preview request failed with status ${response.status}.`);
+        }
+        const blob = await response.blob();
+        nextObjectUrl = URL.createObjectURL(blob);
+        if (!revoked) setObjectUrl(nextObjectUrl);
+      } catch (err) {
+        if (!revoked) setPreviewError(err.message || 'Unable to load attachment preview.');
+      } finally {
+        if (!revoked) setPreviewLoading(false);
+      }
+    }
+
+    loadPreview();
+
+    return () => {
+      revoked = true;
+      if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
+    };
+  }, [attachment, canPreview, previewUrl, rawToken]);
 
   return (
     <Dialog
@@ -875,18 +1242,30 @@ function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = 
         </IconButton>
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0, display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {!attachment ? null : canPreview ? (
+        {!attachment ? null : (previewLoading || (canPreview && !objectUrl && !previewError)) ? (
+          <Stack spacing={1.5} sx={{ m: 'auto', p: 3, textAlign: 'center', alignItems: 'center' }}>
+            <LinearProgress sx={{ width: 220 }} />
+            <Typography variant="body2" color="text.secondary">Loading attachment preview...</Typography>
+          </Stack>
+        ) : previewError ? (
+          <Stack spacing={1.5} sx={{ m: 'auto', p: 3, textAlign: 'center', alignItems: 'center' }}>
+            <InsertDriveFileOutlinedIcon color="primary" sx={{ fontSize: 44 }} />
+            <Typography variant="h6">Unable to load preview</Typography>
+            <Typography variant="body2" color="text.secondary">{previewError}</Typography>
+            <Button variant="contained" href={downloadUrl} target="_blank">Download File</Button>
+          </Stack>
+        ) : canPreview ? (
           mimeType.startsWith('image/') ? (
             <Box sx={{ width: '100%', height: '100%', minHeight: { xs: 0, md: 420 }, p: 2, display: 'grid', placeItems: 'center', bgcolor: (theme) => theme.custom.semantic.paperSoft, overflow: 'auto' }}>
               <Box
                 component="img"
-                src={previewUrl}
+                src={objectUrl}
                 alt={attachment.original_file_name}
                 sx={{ display: 'block', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 1.5 }}
               />
             </Box>
           ) : (
-            <Box component="iframe" title={attachment.original_file_name} src={previewUrl} sx={{ width: '100%', height: '100%', minHeight: { xs: 0, md: 520 }, border: 0 }} />
+            <Box component="iframe" title={attachment.original_file_name} src={objectUrl} sx={{ width: '100%', height: '100%', minHeight: { xs: 0, md: 520 }, border: 0 }} />
           )
         ) : (
           <Stack spacing={1.5} sx={{ m: 'auto', p: 3, textAlign: 'center', alignItems: 'center' }}>
@@ -1092,6 +1471,196 @@ function UpdateRequestDetailsDialog({ open, form, setForm, onClose, onSubmit, fu
   );
 }
 
+function addPdfSection(doc, title, lines, cursor) {
+  let y = cursor;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const ensureSpace = (height = 16) => {
+    if (y + height > pageHeight - 18) {
+      doc.addPage();
+      y = 18;
+    }
+  };
+
+  ensureSpace(18);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text(title, 18, y);
+  y += 8;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  lines.filter(Boolean).forEach((line) => {
+    const wrapped = doc.splitTextToSize(String(line), 174);
+    ensureSpace(wrapped.length * 5 + 2);
+    doc.text(wrapped, 18, y);
+    y += wrapped.length * 5 + 2;
+  });
+  return y + 5;
+}
+
+function downloadRequestReportPdf({ request, attachments, timeline, comments, progressUpdates }) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const roi = calculateRoi(normalizeRoiFromRequest(request));
+  let y = 18;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text('Request Management Report', 18, y);
+  y += 8;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.text(`${request.request_number} | ${request.title}`, 18, y);
+  y += 10;
+
+  y = addPdfSection(doc, 'Request Information', [
+    `Requester: ${request.requester_name}`,
+    `Department: ${request.department_name}`,
+    `Reported To: ${getReportedToName(request)}`,
+    `Priority: ${formatEnum(request.priority)}`,
+    `Status: ${formatEnum(request.status)}`,
+    `Created: ${formatFullDateTime(request.created_at)}`,
+  ], y);
+  y = addPdfSection(doc, 'Business Context', [
+    `Business Justification: ${request.business_justification}`,
+    `Description: ${request.description}`,
+    `Expected Benefits: ${request.expected_benefits || 'Not provided'}`,
+  ], y);
+  y = addPdfSection(doc, 'ROI Information', [
+    `ROI Type: ${roi.typeLabel}`,
+    `Input Values: ${roi.inputLabel}`,
+    `Monthly ROI: ${roi.monthlyLabel}`,
+    `Calculated Annual ROI: ${roi.annualLabel}`,
+  ], y);
+  y = addPdfSection(doc, 'Approval Status', [
+    `Current Status: ${formatEnum(request.status)}`,
+    `Department Head: ${request.department_head_name || getReportedToName(request)}`,
+    `IT Head: ${request.it_head_name || 'Not assigned'}`,
+    `Assigned Team Member: ${request.active_developer_name || 'Not assigned'}`,
+    `Reviewer: ${request.active_qa_name || 'Not assigned'}`,
+  ], y);
+  y = addPdfSection(doc, 'Scope Definition', [
+    request.feasibility_notes ? `Feasibility Notes: ${request.feasibility_notes}` : 'No scope notes available.',
+    request.complexity ? `Complexity: ${formatEnum(request.complexity)}` : '',
+    request.estimated_effort ? `Estimated Effort: ${request.estimated_effort}` : '',
+  ], y);
+  y = addPdfSection(doc, 'User Stories', ['No user stories recorded for this request.'], y);
+  y = addPdfSection(doc, 'Sprint Information', progressUpdates.length ? progressUpdates.map((item) => `${formatFullDateTime(item.created_at)} - ${item.developer_name}: ${item.progress_percentage}% - ${item.update_notes}`) : ['No sprint or development updates available.'], y);
+  y = addPdfSection(doc, 'Attachments', attachments.length ? attachments.map((item) => `${item.original_file_name} (${item.uploaded_by_name}, ${formatFullDateTime(item.uploaded_at)})`) : ['No attachments uploaded.'], y);
+  y = addPdfSection(doc, 'Workflow History', timeline.length ? timeline.map((item) => `${formatFullDateTime(item.changed_at)} - ${item.changed_by_name}: ${item.comment || formatEnum(item.to_status)}`) : ['No workflow history recorded.'], y);
+  y = addPdfSection(doc, 'Comments', comments.length ? comments.map((item) => `${formatFullDateTime(item.created_at)} - ${item.user_name}: ${item.comment_text}`) : ['No comments recorded.'], y);
+
+  doc.save(`${request.request_number}-report.pdf`);
+}
+
+function RequestReportDialog({ open, request, attachments, timeline, comments, progressUpdates, onClose, fullScreen = false }) {
+  if (!request) return null;
+  const roi = calculateRoi(normalizeRoiFromRequest(request));
+
+  return (
+    <Dialog open={open} onClose={onClose} fullScreen={fullScreen} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' } }}>
+          <Box>
+            <Typography variant="h6">Request Management Report</Typography>
+            <Typography variant="caption" color="text.secondary">{request.request_number}</Typography>
+          </Box>
+          <IconButton onClick={onClose} size="small"><CloseIcon /></IconButton>
+        </Stack>
+      </DialogTitle>
+      <DialogContent dividers sx={{ bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
+        <Stack spacing={2}>
+          <ReportSection title="Request Information" rows={[
+            ['Title', request.title],
+            ['Requester', request.requester_name],
+            ['Department', request.department_name],
+            ['Reported To', getReportedToName(request)],
+            ['Status', formatEnum(request.status)],
+            ['Priority', formatEnum(request.priority)],
+          ]} />
+          <ReportNarrative title="Business Context" items={[
+            ['Business Justification', request.business_justification],
+            ['Description', request.description],
+            ['Expected Benefits', request.expected_benefits || 'Not provided'],
+          ]} />
+          <ReportSection title="ROI Information" rows={[
+            ['ROI Type', roi.typeLabel],
+            ['Input Values', roi.inputLabel],
+            ['Monthly ROI', roi.monthlyLabel],
+            ['Calculated Annual ROI', roi.annualLabel],
+          ]} />
+          <ReportSection title="Approval Status" rows={[
+            ['Department Head', request.department_head_name || getReportedToName(request)],
+            ['IT Head', request.it_head_name || 'Not assigned'],
+            ['Assigned Team Member', request.active_developer_name || 'Not assigned'],
+            ['Reviewer', request.active_qa_name || 'Not assigned'],
+          ]} />
+          <ReportNarrative title="Scope Definition" items={[
+            ['Feasibility Notes', request.feasibility_notes || 'No scope notes available.'],
+            ['Complexity', request.complexity ? formatEnum(request.complexity) : 'Not available'],
+            ['Estimated Effort', request.estimated_effort || 'Not available'],
+          ]} />
+          <ReportNarrative title="User Stories" items={[['User Stories', 'No user stories recorded for this request.']]} />
+          <ReportNarrative title="Sprint Information" items={progressUpdates.length ? progressUpdates.map((item) => [`${item.progress_percentage}% by ${item.developer_name}`, item.update_notes]) : [['Sprint Information', 'No sprint or development updates available.']]} />
+          <ReportList title="Attachments" items={attachments.map((item) => `${item.original_file_name} - ${item.uploaded_by_name} - ${formatFullDateTime(item.uploaded_at)}`)} empty="No attachments uploaded." />
+          <ReportList title="Workflow History" items={timeline.map((item) => `${formatFullDateTime(item.changed_at)} - ${item.changed_by_name}: ${item.comment || formatEnum(item.to_status)}`)} empty="No workflow history recorded." />
+          <ReportList title="Activity Timeline" items={timeline.map((item) => `${formatFullDateTime(item.changed_at)} - ${formatEnum(item.to_status)}`)} empty="No activity recorded." />
+          <ReportList title="Comments" items={comments.map((item) => `${formatFullDateTime(item.created_at)} - ${item.user_name}: ${item.comment_text}`)} empty="No comments recorded." />
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 2, py: 1.5 }}>
+        <Button color="inherit" onClick={onClose}>Close</Button>
+        <Button variant="contained" onClick={() => downloadRequestReportPdf({ request, attachments, timeline, comments, progressUpdates })}>
+          Download Report
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function ReportSection({ title, rows }) {
+  return (
+    <Box sx={{ p: 2, borderRadius: 2, bgcolor: (theme) => theme.custom.semantic.elevated, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}` }}>
+      <Typography variant="subtitle1" fontWeight={900}>{title}</Typography>
+      <Divider sx={{ my: 1.25 }} />
+      <Grid container spacing={1}>
+        {rows.map(([label, value]) => (
+          <Grid key={label} size={{ xs: 12, sm: 6 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
+            <Typography variant="body2" fontWeight={760} sx={{ overflowWrap: 'anywhere' }}>{value}</Typography>
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  );
+}
+
+function ReportNarrative({ title, items }) {
+  return (
+    <Box sx={{ p: 2, borderRadius: 2, bgcolor: (theme) => theme.custom.semantic.elevated, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}` }}>
+      <Typography variant="subtitle1" fontWeight={900}>{title}</Typography>
+      <Divider sx={{ my: 1.25 }} />
+      <Stack spacing={1.25}>
+        {items.map(([label, value]) => (
+          <TextBlock key={label} label={label} value={value} />
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
+function ReportList({ title, items, empty }) {
+  return (
+    <Box sx={{ p: 2, borderRadius: 2, bgcolor: (theme) => theme.custom.semantic.elevated, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}` }}>
+      <Typography variant="subtitle1" fontWeight={900}>{title}</Typography>
+      <Divider sx={{ my: 1.25 }} />
+      <Stack spacing={0.8}>
+        {(items.length ? items : [empty]).map((item, index) => (
+          <Typography key={`${title}-${index}`} variant="body2" sx={{ lineHeight: 1.6, overflowWrap: 'anywhere' }}>{item}</Typography>
+        ))}
+      </Stack>
+    </Box>
+  );
+}
+
 function RecentActivity({ items, clarifications }) {
   const clarificationActivities = clarifications.map((item) => ({
     id: `clarification-${item.id}`,
@@ -1159,6 +1728,7 @@ function WorkflowActions(props) {
     assignment,
     setAssignment,
     developers,
+    workloadByDeveloper,
     qaUsers,
     progress,
     setProgress,
@@ -1174,7 +1744,7 @@ function WorkflowActions(props) {
   const canRespondClarification = request.status === 'CLARIFICATION_REQUESTED' && request.requester_user_id === user?.id;
   const canReviewIt = request.status === 'IT_REVIEW_PENDING' && (role === 'IT_HEAD' || isAdmin);
   const hasActiveAssignment = Boolean(request.active_assignment_id);
-  const canAssign = ['ASSIGNMENT_PENDING', 'ASSIGNED'].includes(request.status) && (role === 'IT_HEAD' || isAdmin);
+  const canAssign = ['ASSIGNMENT_PENDING', 'ASSIGNED'].includes(request.status) && (role === 'IT_HEAD' || role === 'PROJECT_MANAGER' || isAdmin);
   const canStartDevelopment = request.status === 'ASSIGNED' && (role === 'DEVELOPER' || isAdmin);
   const canUpdateDevelopment = request.status === 'IN_DEVELOPMENT' && (role === 'DEVELOPER' || isAdmin);
   const canTest = request.status === 'IN_TESTING' && (role === 'QA' || isAdmin);
@@ -1221,6 +1791,7 @@ function WorkflowActions(props) {
     })
     : [];
   const actionGroups = [];
+  const selectedDeveloperWorkload = workloadByDeveloper?.get(Number(assignment.developerUserId));
 
   if (canDepartmentApprove) {
     actionGroups.push(
@@ -1515,7 +2086,7 @@ function WorkflowActions(props) {
                 : true;
 
   return (
-    <SidebarPanel title="Workflow Actions">
+    <SidebarPanel title="Workflow Actions" emphasized>
       <Stack spacing={1.5}>
         {showLatestResponse && (
           <LatestClarificationResponseCard
@@ -1610,8 +2181,27 @@ function WorkflowActions(props) {
                 <>
                   {(selectedAction.assignmentMode === 'developer' || selectedAction.assignmentMode === 'team') && (
                     <TextField select label="Assigned Team Member" value={assignment.developerUserId} onChange={(e) => setAssignment({ ...assignment, developerUserId: e.target.value })}>
-                      {developers.map((developer) => <MenuItem key={developer.id} value={developer.id}>{developer.full_name}</MenuItem>)}
+                      {developers.map((developer) => {
+                        const workload = workloadByDeveloper?.get(Number(developer.id));
+                        const activeCount = workload?.active_request_count ?? 0;
+                        const workloadStatus = workloadStatusLabel(workload?.workload_status);
+                        return (
+                          <MenuItem key={developer.id} value={developer.id}>
+                            <Box sx={{ minWidth: 0 }}>
+                              <Typography variant="body2" fontWeight={750}>{developer.full_name}</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {activeCount} Active Request{activeCount === 1 ? '' : 's'} · {workloadStatus}
+                              </Typography>
+                            </Box>
+                          </MenuItem>
+                        );
+                      })}
                     </TextField>
+                  )}
+                  {selectedDeveloperWorkload?.workload_status === 'OVERLOADED' && (
+                    <Alert severity="warning">
+                      This developer currently has {selectedDeveloperWorkload.active_request_count} active requests assigned and may be overloaded.
+                    </Alert>
                   )}
                   {(selectedAction.assignmentMode === 'qa' || selectedAction.assignmentMode === 'team') && (
                     <TextField select label="Reviewer" value={assignment.qaUserId} onChange={(e) => setAssignment({ ...assignment, qaUserId: e.target.value })}>

@@ -4,7 +4,6 @@ import {
   Avatar,
   Box,
   Button,
-  Checkbox,
   Chip,
   Dialog,
   DialogActions,
@@ -38,19 +37,36 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import GroupIcon from '@mui/icons-material/Group';
 import ApartmentIcon from '@mui/icons-material/Apartment';
 import HowToRegIcon from '@mui/icons-material/HowToReg';
-import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SearchIcon from '@mui/icons-material/Search';
 import CloseIcon from '@mui/icons-material/Close';
+import AddIcon from '@mui/icons-material/Add';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import SecurityOutlinedIcon from '@mui/icons-material/SecurityOutlined';
+import KeyOutlinedIcon from '@mui/icons-material/KeyOutlined';
+import PersonOffOutlinedIcon from '@mui/icons-material/PersonOffOutlined';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
+import ToggleOffOutlinedIcon from '@mui/icons-material/ToggleOffOutlined';
+import ToggleOnOutlinedIcon from '@mui/icons-material/ToggleOnOutlined';
 import api from '../api/client';
-import DataTable from '../components/DataTable';
 import StatusBadge from '../components/StatusBadge';
+import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
-import { MetricCard, SectionCard } from '../components/Surface';
-import { Page, ResponsiveToolbar } from '../components/LayoutPrimitives';
 import { missingReportingAuthorityText } from '../utils/constants';
 
 const lifecycleRoleCodes = ['SYSTEM_ADMIN', 'DEPARTMENT_HEAD', 'EMPLOYEE'];
 const emptyResponsibilities = { total: 0, items: [] };
+const adminRadius = {
+  panel: 2,
+  card: 1.5,
+  control: 1.25,
+  modal: 2,
+};
 const employeeSortAccessors = {
   full_name: (row) => row.full_name || '',
   employee_id: (row) => row.employee_id || '',
@@ -72,12 +88,31 @@ function compareRows(a, b, sortBy) {
 }
 
 function roleTone(roleCode) {
-  if (roleCode === 'SYSTEM_ADMIN') return { color: '#C2410C', bg: '#FFEDD5', border: '#FDBA74' };
+  if (roleCode === 'SYSTEM_ADMIN') return { color: '#DC2626', bg: '#FEE2E2', border: '#FCA5A5' };
   if (roleCode === 'DEPARTMENT_HEAD') return { color: '#7C3AED', bg: '#F3E8FF', border: '#C4B5FD' };
-  if (roleCode === 'IT_HEAD') return { color: '#1D4ED8', bg: '#DBEAFE', border: '#93C5FD' };
+  if (roleCode === 'IT_HEAD') return { color: '#D97706', bg: '#FEF3C7', border: '#FCD34D' };
   if (roleCode === 'DEVELOPER') return { color: '#0F766E', bg: '#CCFBF1', border: '#5EEAD4' };
   if (roleCode === 'QA') return { color: '#A16207', bg: '#FEF9C3', border: '#FDE68A' };
   return { color: '#334155', bg: '#F1F5F9', border: '#CBD5E1' };
+}
+
+function useAdminColors() {
+  const theme = useTheme();
+  return {
+    theme,
+    surface: theme.custom.semantic.elevated,
+    paper: theme.custom.semantic.paper,
+    paperSoft: theme.custom.semantic.paperSoft,
+    border: theme.custom.semantic.border,
+    borderSoft: theme.custom.semantic.borderSoft,
+    text: theme.palette.text.primary,
+    muted: theme.palette.text.secondary,
+    primary: theme.palette.primary.main,
+    success: theme.palette.success.main,
+    danger: theme.palette.error.main,
+    warning: theme.palette.warning.main,
+    shadow: theme.palette.mode === 'dark' ? '0 16px 36px rgba(0,0,0,0.28)' : '0 12px 34px rgba(15,23,42,0.06)',
+  };
 }
 
 export default function AdminPage() {
@@ -87,6 +122,9 @@ export default function AdminPage() {
   const [roles, setRoles] = useState([]);
   const [approval, setApproval] = useState({});
   const [departmentForm, setDepartmentForm] = useState({ name: '', code: '', description: '' });
+  const [departmentAction, setDepartmentAction] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState(null);
+  const [departmentMenuAnchor, setDepartmentMenuAnchor] = useState(null);
   const [employeeTab, setEmployeeTab] = useState('ACTIVE');
   const [selectedUser, setSelectedUser] = useState(null);
   const [dialogAction, setDialogAction] = useState('');
@@ -149,9 +187,65 @@ export default function AdminPage() {
 
   async function createDepartment(event) {
     event.preventDefault();
-    await api.post('/departments', departmentForm);
+    await api.post('/departments', {
+      ...departmentForm,
+      departmentHeadUserId: departmentForm.departmentHeadUserId || null,
+      status: departmentForm.status || 'ACTIVE',
+    });
     setDepartmentForm({ name: '', code: '', description: '' });
     setMessage('Department created.');
+    await load();
+  }
+
+  function openDepartmentDialog(action, department = null) {
+    setDepartmentAction(action);
+    setSelectedDepartment(department);
+    setDepartmentMenuAnchor(null);
+    setDepartmentForm(department ? {
+      name: department.name || '',
+      code: department.code || '',
+      description: department.description || '',
+      departmentHeadUserId: department.department_head_user_id || '',
+      status: department.status || 'ACTIVE',
+    } : { name: '', code: '', description: '', departmentHeadUserId: '', status: 'ACTIVE' });
+  }
+
+  function closeDepartmentDialog() {
+    setDepartmentAction('');
+    setSelectedDepartment(null);
+    setDepartmentMenuAnchor(null);
+    setDepartmentForm({ name: '', code: '', description: '' });
+  }
+
+  async function submitDepartmentDialog(event) {
+    event.preventDefault();
+    const payload = {
+      name: departmentForm.name,
+      code: departmentForm.code,
+      description: departmentForm.description || null,
+      departmentHeadUserId: departmentForm.departmentHeadUserId || null,
+      status: departmentForm.status || 'ACTIVE',
+    };
+    if (departmentAction === 'create') {
+      await api.post('/departments', payload);
+      setMessage('Department created.');
+    } else if (departmentAction === 'edit') {
+      await api.patch(`/departments/${selectedDepartment.id}`, payload);
+      setMessage('Department updated.');
+    } else if (departmentAction === 'head') {
+      await api.patch(`/departments/${selectedDepartment.id}/head`, { departmentHeadUserId: payload.departmentHeadUserId });
+      setMessage('Department head changed.');
+    }
+    closeDepartmentDialog();
+    await load();
+  }
+
+  async function toggleDepartmentStatus(department) {
+    const nextAction = department.status === 'ACTIVE' ? 'deactivate' : 'activate';
+    await api.post(`/departments/${department.id}/${nextAction}`);
+    setDepartmentMenuAnchor(null);
+    setSelectedDepartment(null);
+    setMessage(`Department ${nextAction === 'activate' ? 'activated' : 'deactivated'}.`);
     await load();
   }
 
@@ -269,55 +363,35 @@ export default function AdminPage() {
   }
 
   return (
-    <Page>
-      <PageHeader
-        eyebrow="Enterprise Administration"
-        title="Admin Console"
-        description="Govern users, departments, registrations, and organizational routing from one polished control plane."
-        breadcrumbs={['Home', 'Admin']}
-      />
-      {message && <Alert severity="success">{message}</Alert>}
-      {error && <Alert severity="error">{error}</Alert>}
+    <Page maxWidth={1480}>
+      <Stack spacing={2.5}>
+        <PageHeader
+          eyebrow="ENTERPRISE ADMINISTRATION"
+          title="Admin Console"
+          description="Govern users, departments, registrations, and organizational routing."
+        />
+        {message && <Alert severity="success">{message}</Alert>}
+        {error && <Alert severity="error">{error}</Alert>}
 
-      <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 3 }}><MetricCard label="Pending Registrations" value={registrations.length} accent="#7C3AED" icon={<HowToRegIcon />} trend="Review" /></Grid>
-        <Grid size={{ xs: 12, md: 3 }}><MetricCard label="Active Users" value={activeUsers.length} accent="#2563EB" icon={<GroupIcon />} trend="Directory" /></Grid>
-        <Grid size={{ xs: 12, md: 3 }}><MetricCard label="Departments" value={departments.length} accent="#0F766E" icon={<ApartmentIcon />} trend="Routing" /></Grid>
-        <Grid size={{ xs: 12, md: 3 }}><MetricCard label="Roles" value={roles.length} accent="#F97316" icon={<AdminPanelSettingsIcon />} trend="RBAC" /></Grid>
-      </Grid>
+        <AdminMetricGrid
+          metrics={[
+            { label: 'Pending Registrations', value: registrations.length, icon: <HowToRegIcon /> },
+            { label: 'Active Users', value: activeUsers.length, icon: <GroupIcon /> },
+            { label: 'Departments', value: departments.length, icon: <ApartmentIcon /> },
+            { label: 'Roles', value: roles.length, icon: <AdminPanelSettingsIcon /> },
+          ]}
+        />
 
-      <SectionCard title="Pending Registrations" subtitle="Confirm department routing and assign access before activation">
-        <Box sx={{ p: { xs: 1.25, md: 2.5 } }}>
-          <DataTable
-            rows={registrations}
-            empty="No pending registrations. New employee requests will appear here for admin approval."
-            minWidth={1120}
-            columns={[
-              { key: 'full_name', label: 'Applicant', render: (row) => <UserCell name={row.full_name} caption={row.employee_id} /> },
-              { key: 'email', label: 'Email' },
-              { key: 'requested_department_name', label: 'Requested Department' },
-              { key: 'department', label: 'Confirm Department', render: (row) => (
-                <TextField select size="small" value={approval[row.id]?.departmentId || ''} onChange={(e) => setApprovalField(row.id, 'departmentId', e.target.value)} sx={{ minWidth: 170 }}>
-                  {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
-                </TextField>
-              ) },
-              { key: 'role', label: 'Assign Role', render: (row) => (
-                <TextField select size="small" value={approval[row.id]?.roleId || ''} onChange={(e) => setApprovalField(row.id, 'roleId', e.target.value)} sx={{ minWidth: 170 }}>
-                  {roles.map((role) => <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>)}
-                </TextField>
-              ) },
-              { key: 'actions', label: 'Actions', render: (row) => (
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                  <Button size="small" variant="contained" onClick={() => approve(row.id)}>Approve</Button>
-                  <Button size="small" color="error" variant="outlined" onClick={() => reject(row.id)}>Reject</Button>
-                </Stack>
-              ) },
-            ]}
-          />
-        </Box>
-      </SectionCard>
+        <PendingRegistrationsPanel
+          rows={registrations}
+          departments={departments}
+          roles={roles}
+          approval={approval}
+          setApprovalField={setApprovalField}
+          onApprove={approve}
+          onReject={reject}
+        />
 
-      <SectionCard title="Employee Management" subtitle="Manage employee lifecycle, role changes, reporting structure, and exits">
         <EmployeeManagementPanel
           users={users}
           departments={departments}
@@ -334,33 +408,34 @@ export default function AdminPage() {
           onMessage={setMessage}
           onError={setError}
         />
-      </SectionCard>
 
-      <SectionCard title="Department Management" subtitle="Maintain organization routing and department heads">
-        <ResponsiveToolbar component="form" sx={{ p: 2.5, bgcolor: (theme) => theme.custom.semantic.paperSoft, borderBottom: '1px solid', borderColor: 'divider' }} onSubmit={createDepartment}>
-          <TextField label="Department Name" value={departmentForm.name} onChange={(e) => setDepartmentForm({ ...departmentForm, name: e.target.value })} required />
-          <TextField label="Code" value={departmentForm.code} onChange={(e) => setDepartmentForm({ ...departmentForm, code: e.target.value })} required />
-          <TextField label="Description" value={departmentForm.description} onChange={(e) => setDepartmentForm({ ...departmentForm, description: e.target.value })} fullWidth />
-          <Button type="submit" variant="contained">Create</Button>
-        </ResponsiveToolbar>
-        <Box sx={{ p: { xs: 1.25, md: 2.5 } }}>
-          <DataTable
-            rows={departments}
-            minWidth={760}
-            columns={[
-              { key: 'name', label: 'Department', render: (row) => (
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                  <Avatar sx={{ width: 32, height: 32, bgcolor: '#CCFBF1', color: '#0F766E', fontWeight: 800 }}>{row.name?.[0]}</Avatar>
-                  <Typography fontWeight={800}>{row.name}</Typography>
-                </Stack>
-              ) },
-              { key: 'code', label: 'Code' },
-              { key: 'department_head_name', label: 'Department Head', render: (row) => row.department_head_name || missingReportingAuthorityText },
-              { key: 'status', label: 'Status', render: (row) => <StatusBadge value={row.status} /> },
-            ]}
-          />
-        </Box>
-      </SectionCard>
+        <DepartmentManagementPanel
+          departments={departments}
+          menuAnchor={departmentMenuAnchor}
+          selectedDepartment={selectedDepartment}
+          onCreate={() => openDepartmentDialog('create')}
+          onMenuOpen={(event, department) => {
+            setDepartmentMenuAnchor(event.currentTarget);
+            setSelectedDepartment(department);
+          }}
+          onMenuClose={() => {
+            setDepartmentMenuAnchor(null);
+            setSelectedDepartment(null);
+          }}
+          onAction={openDepartmentDialog}
+          onToggleStatus={toggleDepartmentStatus}
+        />
+      </Stack>
+
+      <DepartmentDialog
+        action={departmentAction}
+        department={selectedDepartment}
+        form={departmentForm}
+        reportingAuthorities={reportingAuthorities}
+        onChange={(field, value) => setDepartmentForm((current) => ({ ...current, [field]: value }))}
+        onClose={closeDepartmentDialog}
+        onSubmit={submitDepartmentDialog}
+      />
 
       <EmployeeLifecycleDialog
         action={dialogAction}
@@ -384,6 +459,284 @@ export default function AdminPage() {
   );
 }
 
+function AdminMetricGrid({ metrics }) {
+  return (
+    <Grid container spacing={1.5}>
+      {metrics.map((metric) => (
+        <Grid key={metric.label} size={{ xs: 12, sm: 6, lg: 3 }}>
+          <AdminMetricTile {...metric} />
+        </Grid>
+      ))}
+    </Grid>
+  );
+}
+
+function AdminMetricTile({ label, value, icon }) {
+  const colors = useAdminColors();
+  return (
+    <Box
+      sx={{
+        p: 1.75,
+        borderRadius: adminRadius.card,
+        border: `1px solid ${colors.borderSoft}`,
+        bgcolor: colors.surface,
+        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+      }}
+    >
+      <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+        <Box sx={{ width: 36, height: 36, borderRadius: adminRadius.control, display: 'grid', placeItems: 'center', color: colors.primary, bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.16)' : '#EFF6FF', border: `1px solid ${colors.borderSoft}` }}>
+          {icon}
+        </Box>
+        <Box>
+          <Typography variant="h5" fontWeight={650}>{value}</Typography>
+          <Typography variant="body2" color="text.secondary">{label}</Typography>
+        </Box>
+      </Stack>
+    </Box>
+  );
+}
+
+function PendingRegistrationsPanel({ rows, departments, roles, approval, setApprovalField, onApprove, onReject }) {
+  const colors = useAdminColors();
+  return (
+    <AdminPanel
+      title="Pending Registrations"
+    >
+      <TableContainer sx={{ overflowX: 'auto' }}>
+        <Table stickyHeader sx={{ minWidth: 980 }}>
+          <TableHead>
+            <TableRow>
+              {['Applicant', 'Email', 'Requested Department', 'Confirm Department', 'Assign Role', 'Actions'].map((label) => (
+                <TableCell key={label}>{label}</TableCell>
+              ))}
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} sx={{ border: 0 }}>
+                  <CompactEmptyState title="No Pending Registrations" message="All registration requests have been processed." />
+                </TableCell>
+              </TableRow>
+            ) : rows.map((row) => (
+              <TableRow key={row.id} hover sx={{ height: 68 }}>
+                <TableCell sx={{ minWidth: 220 }}>
+                  <EmployeeMiniIdentity name={row.full_name} caption={row.employee_id} />
+                </TableCell>
+                <TableCell sx={{ color: colors.muted, minWidth: 220 }}>{row.email}</TableCell>
+                <TableCell>{row.requested_department_name}</TableCell>
+                <TableCell sx={{ minWidth: 190 }}>
+                  <TextField select value={approval[row.id]?.departmentId || ''} onChange={(e) => setApprovalField(row.id, 'departmentId', e.target.value)} fullWidth>
+                    {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+                  </TextField>
+                </TableCell>
+                <TableCell sx={{ minWidth: 190 }}>
+                  <TextField select value={approval[row.id]?.roleId || ''} onChange={(e) => setApprovalField(row.id, 'roleId', e.target.value)} fullWidth>
+                    {roles.map((role) => <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>)}
+                  </TextField>
+                </TableCell>
+                <TableCell sx={{ minWidth: 180 }}>
+                  <Stack direction="row" spacing={1} sx={{ '& .MuiButton-root': { whiteSpace: 'nowrap', borderRadius: adminRadius.control } }}>
+                    <Button size="small" variant="contained" onClick={() => onApprove(row.id)}>Approve</Button>
+                    <Button size="small" color="error" variant="outlined" onClick={() => onReject(row.id)}>Reject</Button>
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </AdminPanel>
+  );
+}
+
+function DepartmentManagementPanel({ departments, menuAnchor, selectedDepartment, onCreate, onMenuOpen, onMenuClose, onAction, onToggleStatus }) {
+  const colors = useAdminColors();
+  return (
+    <AdminPanel
+      title="Department Management"
+      action={<Button variant="contained" startIcon={<AddIcon />} onClick={onCreate} sx={{ whiteSpace: 'nowrap' }}>Add Department</Button>}
+    >
+      <TableContainer sx={{ overflowX: 'auto' }}>
+        <Table stickyHeader sx={{ minWidth: 880 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ width: '32%' }}>Department</TableCell>
+              <TableCell sx={{ width: '12%' }}>Code</TableCell>
+              <TableCell sx={{ width: '30%' }}>Department Head</TableCell>
+              <TableCell sx={{ width: '14%' }}>Status</TableCell>
+              <TableCell align="center" sx={{ width: 72 }}>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {departments.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} sx={{ border: 0 }}>
+                  <CompactEmptyState title="No Departments" message="Create a department to configure organization routing." />
+                </TableCell>
+              </TableRow>
+            ) : departments.map((department) => (
+              <TableRow key={department.id} hover sx={{ height: 68 }}>
+                <TableCell>
+                  <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', minWidth: 0 }}>
+                    <Box sx={{ width: 34, height: 34, borderRadius: adminRadius.control, display: 'grid', placeItems: 'center', bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(20,184,166,0.14)' : '#ECFDF5', color: '#0F766E', border: `1px solid ${colors.borderSoft}` }}>
+                      <BusinessOutlinedIcon fontSize="small" />
+                    </Box>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={600} noWrap>{department.name}</Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap>{department.description || 'No description'}</Typography>
+                    </Box>
+                  </Stack>
+                </TableCell>
+                <TableCell><Typography variant="body2" fontWeight={500}>{department.code}</Typography></TableCell>
+                <TableCell>
+                  <Typography variant="body2" fontWeight={500}>{department.department_head_name || missingReportingAuthorityText}</Typography>
+                  {department.department_head_email && <Typography variant="caption" color="text.secondary">{department.department_head_email}</Typography>}
+                </TableCell>
+                <TableCell><StatusBadge value={department.status} /></TableCell>
+                <TableCell align="center">
+                  <IconButton size="small" onClick={(event) => onMenuOpen(event, department)} aria-label="Department actions">
+                    <MoreVertIcon fontSize="small" />
+                  </IconButton>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <Menu
+        anchorEl={menuAnchor}
+        open={Boolean(menuAnchor)}
+        onClose={onMenuClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        PaperProps={{ sx: { mt: 1, minWidth: 230, borderRadius: adminRadius.card, border: `1px solid ${colors.borderSoft}`, bgcolor: colors.paper } }}
+      >
+        <MenuItem onClick={() => selectedDepartment && onAction('view', selectedDepartment)} sx={{ gap: 1.25 }}><VisibilityOutlinedIcon fontSize="small" />View Details</MenuItem>
+        <MenuItem onClick={() => selectedDepartment && onAction('edit', selectedDepartment)} sx={{ gap: 1.25 }}><EditOutlinedIcon fontSize="small" />Edit</MenuItem>
+        <MenuItem onClick={() => selectedDepartment && onAction('head', selectedDepartment)} sx={{ gap: 1.25 }}><SecurityOutlinedIcon fontSize="small" />Change Department Head</MenuItem>
+        <Divider />
+        <MenuItem onClick={() => selectedDepartment && onToggleStatus(selectedDepartment)} sx={{ gap: 1.25, color: selectedDepartment?.status === 'ACTIVE' ? 'error.main' : 'success.main' }}>
+          {selectedDepartment?.status === 'ACTIVE' ? <ToggleOffOutlinedIcon fontSize="small" /> : <ToggleOnOutlinedIcon fontSize="small" />}
+          {selectedDepartment?.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+        </MenuItem>
+      </Menu>
+    </AdminPanel>
+  );
+}
+
+function DepartmentDialog({ action, department, form, reportingAuthorities, onChange, onClose, onSubmit }) {
+  const colors = useAdminColors();
+  if (!action) return null;
+  const readOnly = action === 'view';
+  const title = {
+    create: 'Add Department',
+    edit: 'Edit Department',
+    head: 'Change Department Head',
+    view: 'Department Details',
+  }[action];
+  return (
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: adminRadius.modal, bgcolor: colors.paper } }}>
+      <Box component={readOnly ? 'div' : 'form'} onSubmit={readOnly ? undefined : onSubmit}>
+        <DialogTitle sx={{ fontWeight: 650 }}>{title}</DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: colors.paperSoft }}>
+          {readOnly ? (
+            <Stack spacing={1.5}>
+              <ProfileField label="Department Name" value={department?.name || '-'} />
+              <ProfileField label="Code" value={department?.code || '-'} />
+              <ProfileField label="Department Head" value={department?.department_head_name || missingReportingAuthorityText} />
+              <ProfileField label="Status" value={<StatusBadge value={department?.status} />} />
+              <TextBlock label="Description" value={department?.description || 'No description'} />
+            </Stack>
+          ) : (
+            <Stack spacing={1.5}>
+              {action !== 'head' && (
+                <>
+                  <TextField label="Department Name" value={form.name || ''} onChange={(e) => onChange('name', e.target.value)} required fullWidth />
+                  <TextField label="Department Code" value={form.code || ''} onChange={(e) => onChange('code', e.target.value)} required fullWidth />
+                  <TextField label="Description" value={form.description || ''} onChange={(e) => onChange('description', e.target.value)} multiline minRows={2} fullWidth />
+                </>
+              )}
+              <TextField select label="Department Head" value={form.departmentHeadUserId || ''} onChange={(e) => onChange('departmentHeadUserId', e.target.value)} fullWidth>
+                <MenuItem value="">No department head</MenuItem>
+                {reportingAuthorities.map((person) => <MenuItem key={person.id} value={person.id}>{person.full_name} · {person.role_name}</MenuItem>)}
+              </TextField>
+              {action !== 'head' && (
+                <TextField select label="Status" value={form.status || 'ACTIVE'} onChange={(e) => onChange('status', e.target.value)} fullWidth>
+                  <MenuItem value="ACTIVE">Active</MenuItem>
+                  <MenuItem value="INACTIVE">Inactive</MenuItem>
+                </TextField>
+              )}
+              <Alert severity="info">
+                Department head changes update future routing automatically and are recorded in audit history.
+              </Alert>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, flexDirection: { xs: 'column-reverse', sm: 'row' }, alignItems: { xs: 'stretch', sm: 'center' } }}>
+          <Button onClick={onClose}>{readOnly ? 'Close' : 'Cancel'}</Button>
+          {!readOnly && <Button type="submit" variant="contained">{action === 'create' ? 'Create Department' : 'Save Changes'}</Button>}
+        </DialogActions>
+      </Box>
+    </Dialog>
+  );
+}
+
+function AdminPanel({ title, subtitle, action, children }) {
+  const colors = useAdminColors();
+  return (
+    <Box sx={{ borderRadius: adminRadius.panel, border: `1px solid ${colors.borderSoft}`, bgcolor: colors.surface, boxShadow: '0 1px 2px rgba(15,23,42,0.04)', overflow: 'hidden' }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, px: { xs: 1.75, md: 2.25 }, py: 1.6, borderBottom: `1px solid ${colors.borderSoft}`, bgcolor: colors.paper }}>
+        <Box>
+          <Typography variant="subtitle1" fontWeight={650}>{title}</Typography>
+          {subtitle && <Typography variant="body2" color="text.secondary">{subtitle}</Typography>}
+        </Box>
+        {action}
+      </Stack>
+      <Box>{children}</Box>
+    </Box>
+  );
+}
+
+function EmployeeMiniIdentity({ name, caption }) {
+  const colors = useAdminColors();
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+      <Avatar sx={{ width: 34, height: 34, bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.16)' : '#EFF6FF', color: 'primary.main', fontWeight: 650, flexShrink: 0 }}>{name?.[0]}</Avatar>
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="body2" fontWeight={600} noWrap>{name}</Typography>
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>{caption}</Typography>
+      </Box>
+    </Stack>
+  );
+}
+
+function CompactEmptyState({ title, message }) {
+  const colors = useAdminColors();
+  return (
+    <Stack spacing={1} sx={{ alignItems: 'center', textAlign: 'center', py: 4, px: 2 }}>
+      <Box sx={{ width: 42, height: 42, borderRadius: adminRadius.control, display: 'grid', placeItems: 'center', color: colors.primary, bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.14)' : '#EFF6FF', border: `1px solid ${colors.borderSoft}` }}>
+        <InfoIconFallback />
+      </Box>
+      <Typography variant="subtitle1" fontWeight={650}>{title}</Typography>
+      <Typography variant="body2" color="text.secondary" maxWidth={360}>{message}</Typography>
+    </Stack>
+  );
+}
+
+function InfoIconFallback() {
+  return <AdminPanelSettingsIcon fontSize="small" />;
+}
+
+function TextBlock({ label, value }) {
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary" fontWeight={600}>{label}</Typography>
+      <Typography variant="body2" sx={{ mt: 0.35, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{value}</Typography>
+    </Box>
+  );
+}
+
 function UserCell({ name, caption }) {
   return (
     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
@@ -397,22 +750,49 @@ function UserCell({ name, caption }) {
 }
 
 function EmployeeIdentityCell({ user }) {
+  const colors = useAdminColors();
   return (
-    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0, maxWidth: '100%' }}>
-      <Avatar sx={{ width: 32, height: 32, bgcolor: '#DBEAFE', color: 'primary.main', fontSize: 13, fontWeight: 900, flexShrink: 0 }}>
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0, maxWidth: '100%' }}>
+      <Avatar
+        sx={{
+          width: 44,
+          height: 44,
+          bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.16)' : '#EFF6FF',
+          color: colors.primary,
+          fontSize: 15,
+          fontWeight: 900,
+          flexShrink: 0,
+          border: `1px solid ${colors.borderSoft}`,
+        }}
+      >
         {user.full_name?.[0]}
       </Avatar>
       <Box sx={{ minWidth: 0, maxWidth: '100%' }}>
-        <Typography variant="body2" fontWeight={900} noWrap sx={{ lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <Typography sx={{ color: colors.text, fontSize: 15, fontWeight: 600, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
           {user.full_name}
         </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {user.employee_id} - {user.email}
+        <Typography variant="caption" sx={{ display: 'block', mt: 0.25, color: colors.muted, fontWeight: 500, lineHeight: 1.25 }}>
+          {user.employee_id}
+        </Typography>
+        <Typography variant="caption" sx={{ display: 'block', color: colors.muted, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+          {user.email}
         </Typography>
       </Box>
     </Stack>
   );
 }
+
+const employeeColors = {
+  primary: '#2563EB',
+  success: '#16A34A',
+  danger: '#DC2626',
+  warning: '#D97706',
+  background: '#F8FAFC',
+  card: '#FFFFFF',
+  border: '#E2E8F0',
+  text: '#0F172A',
+  muted: '#64748B',
+};
 
 function EmployeeManagementPanel({
   users,
@@ -431,6 +811,7 @@ function EmployeeManagementPanel({
   onError,
 }) {
   const theme = useTheme();
+  const colors = useAdminColors();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
@@ -440,27 +821,28 @@ function EmployeeManagementPanel({
   const [sortDirection, setSortDirection] = useState('asc');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(15);
-  const [selectedIds, setSelectedIds] = useState([]);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [menuUser, setMenuUser] = useState(null);
   const [profileUser, setProfileUser] = useState(null);
   const [profileResponsibilities, setProfileResponsibilities] = useState(emptyResponsibilities);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [bulkAction, setBulkAction] = useState('');
+  const [addDrawerOpen, setAddDrawerOpen] = useState(false);
 
   const tabUsers = employeeTab === 'ACTIVE' ? activeUsers : inactiveUsers;
   const filteredUsers = useMemo(() => {
     const source = statusFilter === 'ALL' ? tabUsers : users.filter((user) => user.status === statusFilter);
     const query = search.trim().toLowerCase();
+    const queryTokens = query.split(/\s+/).filter(Boolean);
     return source.filter((user) => {
-      const matchesSearch = !query || [
+      const searchable = [
         user.full_name,
         user.employee_id,
         user.email,
         user.department_name,
         user.role_name,
         user.reporting_manager_name,
-      ].filter(Boolean).join(' ').toLowerCase().includes(query);
+      ].filter(Boolean).join(' ').toLowerCase();
+      const matchesSearch = !query || queryTokens.every((token) => searchable.includes(token));
       return matchesSearch
         && (!departmentFilter || String(user.department_id) === String(departmentFilter))
         && (!roleFilter || String(user.role_id) === String(roleFilter));
@@ -477,15 +859,16 @@ function EmployeeManagementPanel({
     return sortedUsers.slice(start, start + rowsPerPage);
   }, [page, rowsPerPage, sortedUsers]);
 
-  const selectedUsers = useMemo(
-    () => users.filter((user) => selectedIds.includes(user.id)),
-    [selectedIds, users],
-  );
-
   useEffect(() => {
     setPage(0);
-    setSelectedIds([]);
   }, [departmentFilter, employeeTab, roleFilter, search, statusFilter]);
+
+  function resetFilters() {
+    setSearch('');
+    setDepartmentFilter('');
+    setRoleFilter('');
+    setStatusFilter('ALL');
+  }
 
   function requestSort(key) {
     if (sortBy === key) {
@@ -494,21 +877,6 @@ function EmployeeManagementPanel({
     }
     setSortBy(key);
     setSortDirection('asc');
-  }
-
-  function toggleRow(id) {
-    setSelectedIds((current) => (
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
-    ));
-  }
-
-  function togglePageRows(checked) {
-    const pageIds = pagedUsers.map((user) => user.id);
-    setSelectedIds((current) => (
-      checked
-        ? [...new Set([...current, ...pageIds])]
-        : current.filter((id) => !pageIds.includes(id))
-    ));
   }
 
   function openMenu(event, user) {
@@ -535,162 +903,149 @@ function EmployeeManagementPanel({
     }
   }
 
-  function runRowAction(action) {
+  async function runRowAction(action) {
     if (!menuUser) return;
     const user = menuUser;
     closeMenu();
+    if (action === 'reset-password') {
+      try {
+        await api.post(`/admin/users/${user.id}/reset-password`, { password: 'Password123!' });
+        onMessage(`Password reset for ${user.full_name}. Temporary password: Password123!`);
+      } catch (err) {
+        onError(err.message);
+      }
+      return;
+    }
+    if (action === 'delete') {
+      onError('Employees are deactivated, not permanently deleted, so historical records remain intact.');
+      return;
+    }
     onLifecycleAction(action, user);
   }
 
-  function exportSelected() {
-    const headers = ['Employee Name', 'Employee ID', 'Email', 'Department', 'Role', 'Reporting Manager', 'Status', 'Created Date'];
-    const rows = selectedUsers.map((user) => [
+  function exportRows(rowsToExport = sortedUsers) {
+    const headers = ['Employee Name', 'Employee ID', 'Email', 'Department', 'Role', 'Status', 'Created Date'];
+    const csvRows = rowsToExport.map((user) => [
       user.full_name,
       user.employee_id,
       user.email,
       user.department_name,
       user.role_name,
-      user.reporting_manager_name || missingReportingAuthorityText,
       user.status,
       formatDate(user.created_at),
     ]);
-    const csv = [headers, ...rows]
+    const csv = [headers, ...csvRows]
       .map((row) => row.map((cell) => `"${String(cell || '').replaceAll('"', '""')}"`).join(','))
       .join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'selected-employees.csv';
+    link.download = 'employees.csv';
     link.click();
     URL.revokeObjectURL(url);
   }
 
-  const selectedOnPage = pagedUsers.filter((user) => selectedIds.includes(user.id)).length;
-  const allPageSelected = pagedUsers.length > 0 && selectedOnPage === pagedUsers.length;
-  const somePageSelected = selectedOnPage > 0 && !allPageSelected;
-
   return (
-    <Box sx={{ position: 'relative' }}>
-      <Box sx={{ px: { xs: 1.25, md: 2 }, py: 1.25, borderTop: '1px solid', borderColor: 'divider' }}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.25} sx={{ alignItems: { xs: 'stretch', lg: 'center' }, justifyContent: 'space-between' }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ minWidth: 0 }}>
-            <EmployeeStatCard label="Total Employees" value={users.length} tone="#1D4ED8" />
-            <EmployeeStatCard label="Active" value={activeUsers.length} tone="#16A34A" />
-            <EmployeeStatCard label="Inactive" value={inactiveUsers.length} tone="#DC2626" />
-          </Stack>
+    <Box
+      sx={{
+        position: 'relative',
+        bgcolor: colors.paperSoft,
+        borderRadius: adminRadius.panel,
+        border: `1px solid ${colors.borderSoft}`,
+        overflow: 'hidden',
+      }}
+    >
+      <EmployeeManagementHeader
+        onAdd={() => setAddDrawerOpen(true)}
+        onImport={() => onError('Import is a UI entry point. Bulk import processing can be wired to a backend import endpoint when available.')}
+        onExport={() => exportRows(sortedUsers)}
+      />
+
+      <Box sx={{ px: { xs: 2.5, md: 4 }, pb: 4 }}>
+        <EmployeeMetricGrid
+          total={users.length}
+          active={activeUsers.length}
+          inactive={inactiveUsers.length}
+        />
+
+        <EmployeeFilterToolbar
+          search={search}
+          departmentFilter={departmentFilter}
+          roleFilter={roleFilter}
+          statusFilter={statusFilter}
+          departments={departments}
+          roles={roles}
+          onSearch={setSearch}
+          onDepartment={setDepartmentFilter}
+          onRole={setRoleFilter}
+          onStatus={setStatusFilter}
+        />
+
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', mt: 3, mb: 2 }}>
           <Tabs
             value={employeeTab}
             onChange={(_event, value) => onEmployeeTabChange(value)}
             variant="scrollable"
             scrollButtons="auto"
             sx={{
-              minHeight: 34,
-              '& .MuiTab-root': { minHeight: 34, py: 0.25, px: 1.5, fontSize: 13, fontWeight: 850 },
+              minHeight: 40,
+              '& .MuiTabs-indicator': { height: 2, borderRadius: 8, bgcolor: colors.primary },
+              '& .MuiTab-root': { minHeight: 40, px: 2, fontSize: 13, fontWeight: 600, color: colors.muted, textTransform: 'none' },
+              '& .Mui-selected': { color: `${colors.primary} !important` },
             }}
           >
             <Tab value="ACTIVE" label={`Active (${activeUsers.length})`} />
             <Tab value="INACTIVE" label={`Inactive (${inactiveUsers.length})`} />
           </Tabs>
+          <Typography variant="body2" sx={{ color: colors.muted, fontWeight: 500 }}>
+            Showing {pagedUsers.length} of {filteredUsers.length} employees
+          </Typography>
         </Stack>
-      </Box>
 
-      <Box
-        sx={{
-          px: { xs: 1.25, md: 2 },
-          py: 1,
-          borderTop: '1px solid',
-          borderColor: 'divider',
-          bgcolor: (theme) => theme.custom.semantic.paperSoft,
-          '& .MuiInputBase-root': { height: 36 },
-          '& .MuiButton-root': { minHeight: 36, py: 0.5 },
-        }}
-      >
-        <Grid container spacing={1} sx={{ alignItems: 'center' }}>
-          <Grid size={{ xs: 12, lg: 4 }}>
-            <TextField
-              placeholder="Search Employees"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              fullWidth
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-              }}
+        <Box
+          sx={{
+            borderRadius: adminRadius.panel,
+            border: `1px solid ${colors.borderSoft}`,
+            bgcolor: colors.paper,
+            boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+            overflow: 'hidden',
+          }}
+        >
+          {isMobile ? (
+            <EmployeeMobileList
+              loading={loading}
+              rows={pagedUsers}
+              onMenuOpen={openMenu}
             />
-          </Grid>
-          <Grid size={{ xs: 12, sm: 4, lg: 2.1 }}>
-            <TextField select label="Department" value={departmentFilter} onChange={(event) => setDepartmentFilter(event.target.value)} fullWidth>
-              <MenuItem value="">All Departments</MenuItem>
-              {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
-            </TextField>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 4, lg: 1.8 }}>
-            <TextField select label="Role" value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} fullWidth>
-              <MenuItem value="">All Roles</MenuItem>
-              {roles.map((role) => <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>)}
-            </TextField>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 4, lg: 1.5 }}>
-            <TextField select label="Status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} fullWidth>
-              <MenuItem value="ALL">Current Tab</MenuItem>
-              <MenuItem value="ACTIVE">Active</MenuItem>
-              <MenuItem value="INACTIVE">Inactive</MenuItem>
-            </TextField>
-          </Grid>
-          <Grid size={{ xs: 12, lg: 1.6 }}>
-            <Button variant="contained" fullWidth onClick={() => onError('New employees should use the registration flow and be approved from Pending Registrations.')}>
-              + Add Employee
-            </Button>
-          </Grid>
-          <Grid size={{ xs: 12, lg: 1 }}>
-            <Typography variant="caption" color="text.secondary" fontWeight={850} noWrap>
-              {filteredUsers.length} shown
-            </Typography>
-          </Grid>
-        </Grid>
+          ) : (
+            <EmployeeTable
+              loading={loading}
+              rows={pagedUsers}
+              sortBy={sortBy}
+              sortDirection={sortDirection}
+              onSort={requestSort}
+              onMenuOpen={openMenu}
+              onClearFilters={resetFilters}
+              onAdd={() => setAddDrawerOpen(true)}
+            />
+          )}
+
+          <TablePagination
+            component="div"
+            count={sortedUsers.length}
+            page={page}
+            onPageChange={(_event, nextPage) => setPage(nextPage)}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(Number(event.target.value));
+              setPage(0);
+            }}
+            rowsPerPageOptions={[10, 15, 25, 50]}
+            sx={{ px: 2, borderTop: `1px solid ${colors.borderSoft}`, '& .MuiTablePagination-toolbar': { minHeight: 52 } }}
+          />
+        </Box>
       </Box>
-
-      {isMobile ? (
-        <EmployeeMobileList
-          loading={loading}
-          rows={pagedUsers}
-          selectedIds={selectedIds}
-          onToggle={toggleRow}
-          onMenuOpen={openMenu}
-        />
-      ) : (
-        <EmployeeTable
-          loading={loading}
-          rows={pagedUsers}
-          selectedIds={selectedIds}
-          sortBy={sortBy}
-          sortDirection={sortDirection}
-          allPageSelected={allPageSelected}
-          somePageSelected={somePageSelected}
-          onSort={requestSort}
-          onToggle={toggleRow}
-          onTogglePage={togglePageRows}
-          onMenuOpen={openMenu}
-        />
-      )}
-
-      <TablePagination
-        component="div"
-        count={sortedUsers.length}
-        page={page}
-        onPageChange={(_event, nextPage) => setPage(nextPage)}
-        rowsPerPage={rowsPerPage}
-        onRowsPerPageChange={(event) => {
-          setRowsPerPage(Number(event.target.value));
-          setPage(0);
-        }}
-        rowsPerPageOptions={[15, 25, 50]}
-        sx={{ px: 2, borderTop: '1px solid', borderColor: 'divider', '& .MuiTablePagination-toolbar': { minHeight: 44 } }}
-      />
 
       <EmployeeActionMenu
         anchorEl={menuAnchor}
@@ -707,54 +1062,159 @@ function EmployeeManagementPanel({
         onClose={() => setProfileUser(null)}
       />
 
-      {selectedIds.length > 0 && (
-        <BulkEmployeeToolbar
-          count={selectedIds.length}
-          onChangeDepartment={() => setBulkAction('change-department')}
-          onChangeRole={() => setBulkAction('change-role')}
-          onDeactivate={() => setBulkAction('deactivate')}
-          onExport={exportSelected}
-          onClear={() => setSelectedIds([])}
-        />
-      )}
-
-      <BulkActionDialog
-        action={bulkAction}
-        selectedUsers={selectedUsers}
+      <AddEmployeeDrawer
+        open={addDrawerOpen}
         departments={departments}
-        lifecycleRoles={lifecycleRoles}
-        reportingAuthorities={reportingAuthorities}
-        onClose={() => setBulkAction('')}
-        onDone={async (notice) => {
-          setBulkAction('');
-          setSelectedIds([]);
-          onMessage(notice);
+        onClose={() => setAddDrawerOpen(false)}
+        onCreated={async () => {
+          setAddDrawerOpen(false);
+          onMessage('Employee registration created. Review and approve it from Pending Registrations.');
           await onReload();
         }}
         onError={onError}
       />
+
     </Box>
   );
 }
 
-function EmployeeStatCard({ label, value, tone }) {
+function EmployeeManagementHeader({ onAdd, onImport, onExport }) {
+  const colors = useAdminColors();
+  return (
+    <Box sx={{ p: { xs: 2, md: 2.25 }, bgcolor: colors.paper, borderBottom: `1px solid ${colors.borderSoft}` }}>
+      <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2.5} sx={{ alignItems: { xs: 'stretch', lg: 'flex-start' }, justifyContent: 'space-between' }}>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="caption" sx={{ color: colors.primary, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            Workforce Administration
+          </Typography>
+          <Typography variant="h5" sx={{ mt: 0.5, color: colors.text, fontWeight: 650 }}>
+            Employee Management
+          </Typography>
+        </Box>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ '& .MuiButton-root': { minHeight: 38, borderRadius: adminRadius.control, px: 1.5, whiteSpace: 'nowrap' } }}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd}>Add Employee</Button>
+          <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={onImport}>Import Employees</Button>
+          <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={onExport}>Export</Button>
+        </Stack>
+      </Stack>
+    </Box>
+  );
+}
+
+function EmployeeMetricGrid({ total, active, inactive }) {
+  const metrics = [
+    { label: 'Total Employees', value: total, caption: '', icon: <GroupIcon /> },
+    { label: 'Active', value: active, caption: 'Enabled accounts', icon: <CheckCircleIcon /> },
+    { label: 'Inactive', value: inactive, caption: 'Left organization', icon: <PersonOffOutlinedIcon /> },
+  ];
+
+  return (
+    <Grid container spacing={2.5} sx={{ mt: 4 }}>
+      {metrics.map((metric) => (
+        <Grid key={metric.label} size={{ xs: 12, sm: 4 }}>
+          <MetricTile {...metric} />
+        </Grid>
+      ))}
+    </Grid>
+  );
+}
+
+function MetricTile({ label, value, caption, icon }) {
+  const colors = useAdminColors();
   return (
     <Box
       sx={{
-        px: 1.5,
-        py: 0.8,
-        minWidth: { xs: '100%', sm: 132 },
-        borderRadius: 1.75,
-        border: '1px solid',
-        borderColor: 'divider',
-        bgcolor: (theme) => theme.custom.semantic.elevated,
-        boxShadow: (theme) => theme.custom.tokens.shadows.inset,
+        height: '100%',
+        p: 1.6,
+        borderRadius: adminRadius.card,
+        border: `1px solid ${colors.borderSoft}`,
+        bgcolor: colors.paper,
+        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+        transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease',
+        '&:hover': {
+          transform: 'translateY(-2px)',
+          borderColor: colors.border,
+          boxShadow: colors.shadow,
+        },
       }}
     >
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <Typography variant="h6" sx={{ color: tone, lineHeight: 1 }}>{value}</Typography>
-        <Typography variant="caption" color="text.secondary" fontWeight={850} noWrap>{label}</Typography>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+        <Box sx={{ width: 36, height: 36, display: 'grid', placeItems: 'center', borderRadius: adminRadius.control, color: colors.primary, bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.14)' : '#EFF6FF', border: `1px solid ${colors.borderSoft}`, flexShrink: 0 }}>
+          {icon}
+        </Box>
+        <Box>
+          <Typography variant="h5" sx={{ color: colors.text, fontWeight: 650 }}>{value}</Typography>
+          <Typography variant="body2" sx={{ color: colors.text, fontWeight: 500, lineHeight: 1.25 }}>{label}</Typography>
+          {caption && <Typography variant="caption" sx={{ color: colors.muted }}>{caption}</Typography>}
+        </Box>
       </Stack>
+    </Box>
+  );
+}
+
+function EmployeeFilterToolbar({
+  search,
+  departmentFilter,
+  roleFilter,
+  statusFilter,
+  departments,
+  roles,
+  onSearch,
+  onDepartment,
+  onRole,
+  onStatus,
+}) {
+  const colors = useAdminColors();
+  return (
+    <Box
+      sx={{
+        mt: 3,
+        p: 1.5,
+        borderRadius: adminRadius.panel,
+        border: `1px solid ${colors.borderSoft}`,
+        bgcolor: colors.paper,
+        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+        '& .MuiOutlinedInput-root': { minHeight: 42, borderRadius: adminRadius.control },
+        '& .MuiButton-root': { minHeight: 42, borderRadius: adminRadius.control, whiteSpace: 'nowrap' },
+      }}
+    >
+      <Grid container spacing={1.5} sx={{ alignItems: 'center' }}>
+        <Grid size={{ xs: 12, lg: 4.8 }}>
+          <TextField
+            placeholder="Search employees"
+            value={search}
+            onChange={(event) => onSearch(event.target.value)}
+            fullWidth
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon fontSize="small" sx={{ color: colors.muted }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4, lg: 2.05 }}>
+          <TextField select label="Department" value={departmentFilter} onChange={(event) => onDepartment(event.target.value)} fullWidth>
+            <MenuItem value="">All Departments</MenuItem>
+            {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+          </TextField>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4, lg: 1.8 }}>
+          <TextField select label="Role" value={roleFilter} onChange={(event) => onRole(event.target.value)} fullWidth>
+            <MenuItem value="">All Roles</MenuItem>
+            {roles.map((role) => <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>)}
+          </TextField>
+        </Grid>
+        <Grid size={{ xs: 12, sm: 4, lg: 1.55 }}>
+          <TextField select label="Status" value={statusFilter} onChange={(event) => onStatus(event.target.value)} fullWidth>
+            <MenuItem value="ALL">Current Tab</MenuItem>
+            <MenuItem value="ACTIVE">Active</MenuItem>
+            <MenuItem value="INACTIVE">Inactive</MenuItem>
+            <MenuItem value="PENDING_APPROVAL">Pending</MenuItem>
+          </TextField>
+        </Grid>
+      </Grid>
     </Box>
   );
 }
@@ -766,79 +1226,62 @@ function RoleBadge({ roleCode, roleName }) {
       size="small"
       label={roleName || 'Employee'}
       sx={{
+        height: 22,
         color: tone.color,
-        bgcolor: tone.bg,
-        border: `1px solid ${tone.border}`,
-        borderRadius: 999,
-        fontWeight: 850,
+        bgcolor: `${tone.bg}B3`,
+        border: `1px solid ${tone.border}99`,
+        borderRadius: 1,
+        fontSize: 11.5,
+        fontWeight: 600,
         minWidth: 'max-content',
         flexShrink: 0,
-        '& .MuiChip-label': { px: 1.1, display: 'block' },
+        '& .MuiChip-label': { px: 0.9, display: 'block' },
       }}
     />
   );
 }
 
 function EmployeeStatusBadge({ status }) {
-  const active = status === 'ACTIVE';
+  const colors = useAdminColors();
+  const tone = {
+    ACTIVE: { label: 'Active', color: colors.success },
+    INACTIVE: { label: 'Inactive', color: colors.danger },
+    PENDING_APPROVAL: { label: 'Pending', color: colors.warning },
+  }[status] || { label: status || 'Unknown', color: colors.muted };
   return (
-    <Chip
-      size="small"
-      label={active ? 'Active' : 'Inactive'}
-      sx={{
-        color: active ? '#15803D' : '#B91C1C',
-        bgcolor: active ? '#DCFCE7' : '#FEE2E2',
-        border: `1px solid ${active ? '#86EFAC' : '#FCA5A5'}`,
-        borderRadius: 999,
-        fontWeight: 850,
-        minWidth: 72,
-      }}
-    />
-  );
-}
-
-function CompactTextCell({ value }) {
-  return (
-    <TableCell sx={{ py: 0.55, px: 1.25, minWidth: 0 }}>
-      <Typography variant="body2" noWrap sx={{ overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.35 }}>
-        {value}
-      </Typography>
-    </TableCell>
+    <Stack direction="row" spacing={0.85} sx={{ alignItems: 'center' }}>
+      <Box sx={{ width: 7, height: 7, borderRadius: 999, bgcolor: tone.color, flexShrink: 0 }} />
+      <Typography variant="body2" sx={{ color: colors.text, fontWeight: 500 }}>{tone.label}</Typography>
+    </Stack>
   );
 }
 
 function EmployeeTable({
   loading,
   rows,
-  selectedIds,
   sortBy,
   sortDirection,
-  allPageSelected,
-  somePageSelected,
   onSort,
-  onToggle,
-  onTogglePage,
   onMenuOpen,
+  onClearFilters,
+  onAdd,
 }) {
+  const colors = useAdminColors();
   const columns = [
-    { key: 'full_name', label: 'Employee Name', width: '30%' },
-    { key: 'department_name', label: 'Department', width: '15%' },
-    { key: 'role_name', label: 'Role', width: '14%' },
-    { key: 'reporting_manager_name', label: 'Reporting Manager', width: '18%' },
-    { key: 'status', label: 'Status', width: '9%' },
-    { key: 'created_at', label: 'Created Date', width: '10%' },
+    { key: 'full_name', label: 'Employee', width: '38%' },
+    { key: 'department_name', label: 'Department', width: '20%' },
+    { key: 'role_name', label: 'Role', width: '16%' },
+    { key: 'status', label: 'Status', width: '12%' },
+    { key: 'created_at', label: 'Created Date', width: '12%' },
   ];
 
   return (
-    <TableContainer sx={{ maxHeight: 720, borderTop: '1px solid', borderColor: 'divider', overflowX: 'hidden' }}>
-      <Table stickyHeader size="small" sx={{ width: '100%', tableLayout: 'fixed' }}>
+    <TableContainer sx={{ maxHeight: 760, overflowX: 'hidden' }}>
+      <Table stickyHeader sx={{ width: '100%', tableLayout: 'fixed' }}>
         <TableHead>
           <TableRow>
-            <TableCell padding="checkbox" sx={{ width: 44, bgcolor: (theme) => theme.custom.semantic.paper, py: 0.35 }}>
-              <Checkbox size="small" checked={allPageSelected} indeterminate={somePageSelected} onChange={(event) => onTogglePage(event.target.checked)} />
-            </TableCell>
             {columns.map((column) => (
-              <TableCell key={column.key} sx={{ width: column.width, bgcolor: (theme) => theme.custom.semantic.paper, py: 0.7, px: 1.25, whiteSpace: 'nowrap' }}>
+              <TableCell key={column.key} sx={{ width: column.width, bgcolor: colors.paperSoft, py: 1.2, px: 2, whiteSpace: 'nowrap' }}>
                 <TableSortLabel
                   active={sortBy === column.key}
                   direction={sortBy === column.key ? sortDirection : 'asc'}
@@ -848,49 +1291,51 @@ function EmployeeTable({
                 </TableSortLabel>
               </TableCell>
             ))}
-            <TableCell align="right" sx={{ width: 56, bgcolor: (theme) => theme.custom.semantic.paper, py: 0.7, px: 1, whiteSpace: 'nowrap' }}>Actions</TableCell>
+            <TableCell align="center" sx={{ width: 64, bgcolor: colors.paperSoft, py: 1.2, px: 1.5, whiteSpace: 'nowrap' }}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {loading ? Array.from({ length: 8 }).map((_, index) => (
-            <TableRow key={`employee-skeleton-${index}`} sx={{ height: 58 }}>
-              <TableCell padding="checkbox"><Skeleton width={22} /></TableCell>
-              {columns.map((column) => <TableCell key={column.key} sx={{ py: 0.55, px: 1.25 }}><Skeleton height={24} /></TableCell>)}
-              <TableCell align="right"><Skeleton width={28} /></TableCell>
+          {loading ? Array.from({ length: 7 }).map((_, index) => (
+            <TableRow key={`employee-skeleton-${index}`} sx={{ height: 72 }}>
+              {columns.map((column) => <TableCell key={column.key} sx={{ py: 1.5, px: 2.25 }}><Skeleton height={28} /></TableCell>)}
+              <TableCell align="center"><Skeleton width={30} /></TableCell>
             </TableRow>
           )) : rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={columns.length + 2}>
-                <Box sx={{ py: 7, textAlign: 'center' }}>
-                  <Typography variant="h6">No employees found</Typography>
-                  <Typography variant="body2" color="text.secondary">Adjust search or filters to find employee records.</Typography>
-                </Box>
+              <TableCell colSpan={columns.length + 1} sx={{ border: 0 }}>
+                <EmployeeEmptyState onAdd={onAdd} onClear={onClearFilters} />
               </TableCell>
             </TableRow>
-          ) : rows.map((row, index) => (
+          ) : rows.map((row) => (
             <TableRow
-              hover
               key={row.id}
-              selected={selectedIds.includes(row.id)}
               sx={{
-                height: 60,
-                bgcolor: index % 2 === 1 ? 'rgba(248,250,252,0.52)' : 'transparent',
-                '&:hover': { bgcolor: 'rgba(219,234,254,0.38)' },
+                height: 72,
+                transition: 'background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease',
+                '&:hover': {
+                  bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(148,163,184,0.08)' : '#F8FAFC',
+                  boxShadow: `inset 3px 0 0 ${colors.primary}`,
+                },
               }}
             >
-              <TableCell padding="checkbox" sx={{ width: 44, py: 0.55 }}>
-                <Checkbox size="small" checked={selectedIds.includes(row.id)} onChange={() => onToggle(row.id)} />
-              </TableCell>
-              <TableCell sx={{ py: 0.55, px: 1.25, minWidth: 0 }}>
+              <TableCell sx={{ py: 1.5, px: 2.25, minWidth: 0 }}>
                 <EmployeeIdentityCell user={row} />
               </TableCell>
-              <CompactTextCell value={row.department_name || '-'} />
-              <TableCell sx={{ py: 0.55, px: 1.25, overflow: 'visible' }}><RoleBadge roleCode={row.role_code} roleName={row.role_name} /></TableCell>
-              <CompactTextCell value={row.reporting_manager_name || missingReportingAuthorityText} />
-              <TableCell sx={{ py: 0.55, px: 1.25 }}><EmployeeStatusBadge status={row.status} /></TableCell>
-              <CompactTextCell value={formatDate(row.created_at)} />
-              <TableCell align="right" sx={{ py: 0.55, px: 1 }}>
-                <IconButton size="small" onClick={(event) => onMenuOpen(event, row)} aria-label="Employee actions" sx={{ width: 30, height: 30 }}>
+              <TableCell sx={{ py: 1.5, px: 2.25, minWidth: 0 }}>
+                <Typography variant="body2" sx={{ color: colors.text, fontWeight: 500, overflowWrap: 'anywhere' }}>{row.department_name || '-'}</Typography>
+              </TableCell>
+              <TableCell sx={{ py: 1.5, px: 2.25, overflow: 'visible' }}><RoleBadge roleCode={row.role_code} roleName={row.role_name} /></TableCell>
+              <TableCell sx={{ py: 1.5, px: 2.25 }}><EmployeeStatusBadge status={row.status} /></TableCell>
+              <TableCell sx={{ py: 1.5, px: 2.25 }}>
+                <Typography variant="body2" sx={{ color: colors.text, fontWeight: 500, whiteSpace: 'nowrap' }}>{formatDate(row.created_at)}</Typography>
+              </TableCell>
+              <TableCell align="center" sx={{ py: 1.5, px: 1.25 }}>
+                <IconButton
+                  size="small"
+                  onClick={(event) => onMenuOpen(event, row)}
+                  aria-label="Employee actions"
+                  sx={{ width: 34, height: 34, color: colors.muted, '&:hover': { bgcolor: colors.paperSoft, color: colors.text } }}
+                >
                   <MoreVertIcon fontSize="small" />
                 </IconButton>
               </TableCell>
@@ -902,41 +1347,56 @@ function EmployeeTable({
   );
 }
 
-function EmployeeMobileList({ loading, rows, selectedIds, onToggle, onMenuOpen }) {
+function EmployeeEmptyState({ onAdd, onClear }) {
+  const colors = useAdminColors();
   return (
-    <Stack spacing={1.25} sx={{ p: 1.25 }}>
+    <Stack spacing={1.25} sx={{ alignItems: 'center', textAlign: 'center', py: 4 }}>
+      <Box sx={{ width: 48, height: 48, borderRadius: adminRadius.control, display: 'grid', placeItems: 'center', bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.14)' : '#EFF6FF', color: colors.primary, border: `1px solid ${colors.borderSoft}` }}>
+        <GroupIcon />
+      </Box>
+      <Box>
+        <Typography variant="subtitle1" sx={{ color: colors.text, fontWeight: 650 }}>No employees found</Typography>
+        <Typography variant="body2" sx={{ color: colors.muted, mt: 0.5 }}>Try clearing filters or create a new employee registration.</Typography>
+      </Box>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+        {onAdd && <Button variant="contained" startIcon={<AddIcon />} onClick={onAdd} sx={{ whiteSpace: 'nowrap' }}>Add Employee</Button>}
+        {onClear && <Button variant="outlined" startIcon={<RestartAltIcon />} onClick={onClear} sx={{ whiteSpace: 'nowrap' }}>Clear Filters</Button>}
+      </Stack>
+    </Stack>
+  );
+}
+
+function EmployeeMobileList({ loading, rows, onMenuOpen }) {
+  const colors = useAdminColors();
+  return (
+    <Stack spacing={1.5} sx={{ p: 1.5 }}>
       {loading ? Array.from({ length: 5 }).map((_, index) => (
-        <Box key={`employee-mobile-skeleton-${index}`} sx={{ p: 2, borderRadius: 2, border: '1px solid', borderColor: 'divider' }}>
+        <Box key={`employee-mobile-skeleton-${index}`} sx={{ p: 2, borderRadius: adminRadius.card, border: `1px solid ${colors.borderSoft}`, bgcolor: colors.paper }}>
           <Skeleton width="65%" height={28} />
           <Skeleton width="42%" />
           <Skeleton width="88%" />
         </Box>
       )) : rows.length === 0 ? (
-        <Box sx={{ py: 6, textAlign: 'center' }}>
-          <Typography variant="h6">No employees found</Typography>
-          <Typography variant="body2" color="text.secondary">Try clearing one or more filters.</Typography>
-        </Box>
+        <EmployeeEmptyState />
       ) : rows.map((row) => (
         <Box
           key={row.id}
           sx={{
-            p: 1.15,
-            borderRadius: 1.75,
-            border: '1px solid',
-            borderColor: 'divider',
-            bgcolor: (theme) => theme.custom.semantic.elevated,
+            p: 1.5,
+            borderRadius: adminRadius.card,
+            border: `1px solid ${colors.borderSoft}`,
+            bgcolor: colors.paper,
+            boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
           }}
         >
           <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-            <Checkbox checked={selectedIds.includes(row.id)} onChange={() => onToggle(row.id)} sx={{ p: 0.25 }} />
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <EmployeeIdentityCell user={row} />
-              <Stack direction="row" spacing={0.75} sx={{ mt: 0.75, flexWrap: 'wrap' }}>
+              <Stack direction="row" spacing={0.75} sx={{ mt: 1, flexWrap: 'wrap' }}>
                 <RoleBadge roleCode={row.role_code} roleName={row.role_name} />
                 <EmployeeStatusBadge status={row.status} />
               </Stack>
-              <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 0.75 }}><strong>Department:</strong> {row.department_name || '-'}</Typography>
-              <Typography variant="body2" color="text.secondary" noWrap><strong>Reporting Manager:</strong> {row.reporting_manager_name || missingReportingAuthorityText}</Typography>
+              <Typography variant="body2" color="text.secondary" noWrap sx={{ mt: 1 }}>Department: {row.department_name || '-'}</Typography>
             </Box>
             <IconButton size="small" onClick={(event) => onMenuOpen(event, row)} aria-label="Employee actions">
               <MoreVertIcon fontSize="small" />
@@ -949,39 +1409,51 @@ function EmployeeMobileList({ loading, rows, selectedIds, onToggle, onMenuOpen }
 }
 
 function EmployeeActionMenu({ anchorEl, user, onClose, onView, onAction }) {
+  const colors = useAdminColors();
   const active = user?.status === 'ACTIVE';
+  const itemSx = { gap: 1.25, minHeight: 40, fontWeight: 500 };
   return (
-    <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={onClose} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
-      <MenuItem onClick={onView}>View Profile</MenuItem>
+    <Menu
+      anchorEl={anchorEl}
+      open={Boolean(anchorEl)}
+      onClose={onClose}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      PaperProps={{ sx: { mt: 1, minWidth: 240, borderRadius: adminRadius.card, border: `1px solid ${colors.borderSoft}`, bgcolor: colors.paper, boxShadow: colors.shadow } }}
+    >
+      <MenuItem onClick={onView} sx={itemSx}><VisibilityOutlinedIcon fontSize="small" />View Profile</MenuItem>
       {active ? [
-        <MenuItem key="edit" onClick={() => onAction('edit')}>Edit Employee</MenuItem>,
-        <MenuItem key="role" onClick={() => onAction('change-role')}>Change Role</MenuItem>,
-        <MenuItem key="department" onClick={() => onAction('change-department')}>Change Department</MenuItem>,
-        <MenuItem key="manager" onClick={() => onAction('change-manager')}>Change Reporting Manager</MenuItem>,
-        <MenuItem key="reassign" onClick={() => onAction('reassign')}>Reassign Responsibilities</MenuItem>,
-        <MenuItem key="deactivate" onClick={() => onAction('deactivate')} sx={{ color: 'error.main' }}>Deactivate Employee</MenuItem>,
+        <MenuItem key="edit" onClick={() => onAction('edit')} sx={itemSx}><EditOutlinedIcon fontSize="small" />Edit Employee</MenuItem>,
+        <MenuItem key="role" onClick={() => onAction('change-role')} sx={itemSx}><SecurityOutlinedIcon fontSize="small" />Change Role</MenuItem>,
+        <MenuItem key="department" onClick={() => onAction('change-department')} sx={itemSx}><ApartmentIcon fontSize="small" />Change Department</MenuItem>,
+        <MenuItem key="manager" onClick={() => onAction('change-manager')} sx={itemSx}><GroupIcon fontSize="small" />Change Reporting Manager</MenuItem>,
+        <MenuItem key="reassign" onClick={() => onAction('reassign')} sx={itemSx}><RestartAltIcon fontSize="small" />Reassign Responsibilities</MenuItem>,
+        <MenuItem key="reset" onClick={() => onAction('reset-password')} sx={itemSx}><KeyOutlinedIcon fontSize="small" />Reset Password</MenuItem>,
+        <Divider key="divider" />,
+        <MenuItem key="deactivate" onClick={() => onAction('deactivate')} sx={{ ...itemSx, color: colors.danger }}><PersonOffOutlinedIcon fontSize="small" />Deactivate</MenuItem>,
       ] : (
-        <MenuItem onClick={() => onAction('reactivate')}>Reactivate Employee</MenuItem>
+        <MenuItem onClick={() => onAction('reactivate')} sx={itemSx}><CheckCircleIcon fontSize="small" />Reactivate Employee</MenuItem>
       )}
     </Menu>
   );
 }
 
 function EmployeeProfileDrawer({ user, responsibilities, loading, onClose }) {
+  const colors = useAdminColors();
   const items = responsibilities.items || [];
   const countFor = (key) => items.find((item) => item.key === key)?.count || 0;
   return (
-    <Drawer anchor="right" open={Boolean(user)} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', sm: 440 }, p: 0 } }}>
+    <Drawer anchor="right" open={Boolean(user)} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', sm: 520 }, p: 0, bgcolor: colors.paperSoft } }}>
       {user && (
-        <Stack spacing={2} sx={{ height: '100%' }}>
-          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', justifyContent: 'space-between', p: 2.25, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Stack spacing={0} sx={{ height: '100%' }}>
+          <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', justifyContent: 'space-between', p: 2.25, bgcolor: colors.paper, borderBottom: `1px solid ${colors.borderSoft}` }}>
             <Box>
-              <Typography variant="overline" color="text.secondary" fontWeight={900}>Employee Profile</Typography>
-              <Typography variant="h6">{user.full_name}</Typography>
+              <Typography variant="caption" sx={{ color: colors.primary, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Employee Profile</Typography>
+              <Typography variant="h5" sx={{ color: colors.text, fontWeight: 650 }}>{user.full_name}</Typography>
             </Box>
             <IconButton onClick={onClose}><CloseIcon /></IconButton>
           </Stack>
-          <Stack spacing={1.5} sx={{ px: 2.25, pb: 2.25, overflowY: 'auto' }}>
+          <Stack spacing={2} sx={{ p: 2.5, overflowY: 'auto' }}>
             <ProfileSection title="Employee Information">
               <ProfileField label="Name" value={user.full_name} />
               <ProfileField label="Employee ID" value={user.employee_id} />
@@ -1015,142 +1487,154 @@ function EmployeeProfileDrawer({ user, responsibilities, loading, onClose }) {
 }
 
 function ProfileSection({ title, children }) {
+  const colors = useAdminColors();
   return (
-    <Box sx={{ p: 2, borderRadius: 2.25, border: '1px solid', borderColor: 'divider', bgcolor: (theme) => theme.custom.semantic.elevated }}>
-      <Typography variant="subtitle2" fontWeight={900} sx={{ mb: 1.25 }}>{title}</Typography>
+    <Box sx={{ p: 1.75, borderRadius: adminRadius.card, border: `1px solid ${colors.borderSoft}`, bgcolor: colors.paper, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+      <Typography variant="subtitle2" sx={{ color: colors.text, fontWeight: 650, mb: 1.25 }}>{title}</Typography>
       <Stack spacing={1}>{children}</Stack>
     </Box>
   );
 }
 
 function ProfileField({ label, value }) {
+  const colors = useAdminColors();
   return (
     <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-      <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
-      <Typography component="div" variant="body2" fontWeight={800} sx={{ textAlign: 'right', overflowWrap: 'anywhere' }}>{value}</Typography>
+      <Typography variant="caption" sx={{ color: colors.muted, fontWeight: 600 }}>{label}</Typography>
+      <Typography component="div" variant="body2" sx={{ color: colors.text, fontWeight: 500, textAlign: 'right', overflowWrap: 'anywhere' }}>{value}</Typography>
     </Stack>
   );
 }
 
 function MiniMetric({ label, value }) {
+  const colors = useAdminColors();
   return (
-    <Box sx={{ p: 1.2, borderRadius: 1.75, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
-      <Typography variant="h6">{value}</Typography>
-      <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
+    <Box sx={{ p: 1.2, borderRadius: adminRadius.control, bgcolor: colors.paperSoft, border: `1px solid ${colors.borderSoft}` }}>
+      <Typography variant="h6" sx={{ color: colors.text, fontWeight: 650 }}>{value}</Typography>
+      <Typography variant="caption" sx={{ color: colors.muted, fontWeight: 500 }}>{label}</Typography>
     </Box>
   );
 }
 
-function BulkEmployeeToolbar({ count, onChangeDepartment, onChangeRole, onDeactivate, onExport, onClear }) {
-  return (
-    <Box
-      sx={{
-        position: 'sticky',
-        bottom: 16,
-        zIndex: 4,
-        mx: { xs: 1.25, md: 2.5 },
-        mb: 2,
-        p: 1,
-        borderRadius: 2,
-        border: '1px solid',
-        borderColor: 'divider',
-        bgcolor: (theme) => theme.custom.semantic.paper,
-        boxShadow: (theme) => theme.custom.tokens.shadows.hover,
-      }}
-    >
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} sx={{ alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between' }}>
-        <Typography variant="body2" fontWeight={900}>{count} employee{count === 1 ? '' : 's'} selected</Typography>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-          <Button size="small" variant="outlined" onClick={onChangeDepartment}>Change Department</Button>
-          <Button size="small" variant="outlined" onClick={onChangeRole}>Change Role</Button>
-          <Button size="small" color="error" variant="outlined" onClick={onDeactivate}>Deactivate</Button>
-          <Button size="small" variant="outlined" onClick={onExport}>Export</Button>
-          <Button size="small" onClick={onClear}>Clear</Button>
-        </Stack>
-      </Stack>
-    </Box>
-  );
-}
-
-function BulkActionDialog({ action, selectedUsers, departments, lifecycleRoles, reportingAuthorities, onClose, onDone, onError }) {
-  const [form, setForm] = useState({ departmentId: '', roleId: '', reportingManagerUserId: '', replacementDepartmentHeadUserId: '' });
+function AddEmployeeDrawer({ open, departments, onClose, onCreated, onError }) {
+  const colors = useAdminColors();
+  const [form, setForm] = useState({
+    fullName: '',
+    employeeId: '',
+    email: '',
+    mobileNumber: '',
+    designation: 'Employee',
+    departmentId: '',
+    password: 'Password123!',
+    confirmPassword: 'Password123!',
+  });
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    setForm({ departmentId: '', roleId: '', reportingManagerUserId: '', replacementDepartmentHeadUserId: '' });
-    setSubmitting(false);
-  }, [action]);
+    if (open) {
+      setForm({
+        fullName: '',
+        employeeId: '',
+        email: '',
+        mobileNumber: '',
+        designation: 'Employee',
+        departmentId: '',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+      });
+      setSubmitting(false);
+    }
+  }, [open]);
 
-  if (!action) return null;
+  function setField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
 
-  const title = {
-    'change-department': 'Bulk Change Department',
-    'change-role': 'Bulk Change Role',
-    deactivate: 'Bulk Deactivate Employees',
-  }[action];
-
-  async function submit() {
+  async function submit(event) {
+    event.preventDefault();
     setSubmitting(true);
     try {
-      if (action === 'change-department') {
-        await Promise.all(selectedUsers.map((user) => api.post(`/users/${user.id}/change-department`, {
-          departmentId: form.departmentId,
-          reportingManagerUserId: form.reportingManagerUserId,
-          replacementDepartmentHeadUserId: form.replacementDepartmentHeadUserId || null,
-        })));
-        await onDone('Department updated for selected employees.');
-      } else if (action === 'change-role') {
-        await Promise.all(selectedUsers.map((user) => api.post(`/users/${user.id}/change-role`, {
-          roleId: form.roleId,
-          replacementDepartmentHeadUserId: form.replacementDepartmentHeadUserId || null,
-        })));
-        await onDone('Role updated for selected employees.');
-      } else if (action === 'deactivate') {
-        await Promise.all(selectedUsers.map((user) => api.post(`/users/${user.id}/deactivate`)));
-        await onDone('Selected employees deactivated.');
-      }
+      await api.post('/auth/register', form);
+      await onCreated();
     } catch (err) {
       onError(err.message);
       setSubmitting(false);
     }
   }
 
-  const disabled = submitting
-    || (action === 'change-department' && (!form.departmentId || !form.reportingManagerUserId))
-    || (action === 'change-role' && !form.roleId);
-
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>{title}</DialogTitle>
-      <DialogContent dividers>
-        <Stack spacing={2}>
-          <Alert severity={action === 'deactivate' ? 'warning' : 'info'}>
-            {action === 'deactivate'
-              ? `This will deactivate ${selectedUsers.length} selected employee${selectedUsers.length === 1 ? '' : 's'}. Employees with active responsibilities must be reassigned first.`
-              : `This action applies to ${selectedUsers.length} selected employee${selectedUsers.length === 1 ? '' : 's'}.`}
-          </Alert>
-          {action === 'change-department' && (
-            <>
-              <SelectField label="New Department" value={form.departmentId} options={departments.filter((item) => item.status === 'ACTIVE')} getLabel={(item) => item.name} onChange={(value) => setForm((current) => ({ ...current, departmentId: value }))} />
-              <SelectField label="New Reporting Manager" value={form.reportingManagerUserId} options={reportingAuthorities} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => setForm((current) => ({ ...current, reportingManagerUserId: value }))} />
-              <SelectField label="Replacement Department Head If Needed" value={form.replacementDepartmentHeadUserId} options={reportingAuthorities} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => setForm((current) => ({ ...current, replacementDepartmentHeadUserId: value }))} />
-            </>
-          )}
-          {action === 'change-role' && (
-            <>
-              <SelectField label="New Role" value={form.roleId} options={lifecycleRoles} getLabel={(role) => role.name} onChange={(value) => setForm((current) => ({ ...current, roleId: value }))} />
-              <SelectField label="Replacement Department Head If Needed" value={form.replacementDepartmentHeadUserId} options={reportingAuthorities} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => setForm((current) => ({ ...current, replacementDepartmentHeadUserId: value }))} />
-            </>
-          )}
+    <Drawer anchor="right" open={open} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', md: 660 }, bgcolor: colors.paperSoft } }}>
+      <Box component="form" onSubmit={submit} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center', justifyContent: 'space-between', p: 2.25, bgcolor: colors.paper, borderBottom: `1px solid ${colors.borderSoft}` }}>
+          <Box>
+            <Typography variant="caption" sx={{ color: colors.primary, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Create Employee</Typography>
+            <Typography variant="h5" sx={{ color: colors.text, fontWeight: 650 }}>Add Employee</Typography>
+            <Typography variant="body2" sx={{ color: colors.muted }}>Create an employee registration for admin approval.</Typography>
+          </Box>
+          <IconButton onClick={onClose}><CloseIcon /></IconButton>
         </Stack>
-      </DialogContent>
-      <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" color={action === 'deactivate' ? 'error' : 'primary'} onClick={submit} disabled={disabled}>
-          {submitting ? 'Working...' : action === 'deactivate' ? 'Confirm Deactivation' : 'Apply Changes'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+
+        <Stack spacing={1.5} sx={{ p: 2, flex: 1, overflowY: 'auto', '& .MuiOutlinedInput-root': { minHeight: 42, borderRadius: adminRadius.control } }}>
+          <DrawerSection title="Basic Information">
+            <Grid container spacing={1.5}>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Full Name" value={form.fullName} onChange={(e) => setField('fullName', e.target.value)} required fullWidth /></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Employee ID" value={form.employeeId} onChange={(e) => setField('employeeId', e.target.value)} required fullWidth /></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Email" type="email" value={form.email} onChange={(e) => setField('email', e.target.value)} required fullWidth /></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Mobile Number" value={form.mobileNumber} onChange={(e) => setField('mobileNumber', e.target.value)} fullWidth /></Grid>
+            </Grid>
+          </DrawerSection>
+
+          <DrawerSection title="Employment Information">
+            <Grid container spacing={1.5}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField select label="Department" value={form.departmentId} onChange={(e) => setField('departmentId', e.target.value)} required fullWidth>
+                  {departments.filter((department) => department.status === 'ACTIVE').map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+                </TextField>
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField select label="Designation" value={form.designation} onChange={(e) => setField('designation', e.target.value)} required fullWidth>
+                  {['Employee', 'Department Head', 'IT Manager', 'IT Head', 'Developer', 'QA', 'System Admin / Head / CEO'].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+                </TextField>
+              </Grid>
+            </Grid>
+          </DrawerSection>
+
+          <DrawerSection title="Role & Permissions">
+            <Alert severity="info">Role assignment is finalized from Pending Registrations when the admin approves this employee.</Alert>
+          </DrawerSection>
+
+          <DrawerSection title="Reporting Structure">
+            <Alert severity="info">
+              Reported To is resolved from the selected department head during approval. If no department head exists, configure one in Department Management before routing requests.
+            </Alert>
+          </DrawerSection>
+
+          <DrawerSection title="Account Settings">
+            <Grid container spacing={1.5}>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Initial Password" type="password" value={form.password} onChange={(e) => setField('password', e.target.value)} required fullWidth /></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Confirm Password" type="password" value={form.confirmPassword} onChange={(e) => setField('confirmPassword', e.target.value)} required fullWidth /></Grid>
+            </Grid>
+          </DrawerSection>
+        </Stack>
+
+        <Stack direction={{ xs: 'column-reverse', sm: 'row' }} spacing={1} sx={{ justifyContent: 'flex-end', p: 1.75, bgcolor: colors.paper, borderTop: `1px solid ${colors.borderSoft}`, position: 'sticky', bottom: 0, '& .MuiButton-root': { whiteSpace: 'nowrap' } }}>
+          <Button onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button type="submit" variant="contained" disabled={submitting || !form.fullName || !form.employeeId || !form.email || !form.departmentId}>
+            {submitting ? 'Creating...' : 'Create Employee'}
+          </Button>
+        </Stack>
+      </Box>
+    </Drawer>
+  );
+}
+
+function DrawerSection({ title, children }) {
+  const colors = useAdminColors();
+  return (
+    <Box sx={{ p: 1.75, borderRadius: adminRadius.card, border: `1px solid ${colors.borderSoft}`, bgcolor: colors.paper, boxShadow: '0 1px 2px rgba(15,23,42,0.04)' }}>
+      <Typography variant="subtitle2" sx={{ mb: 1.25, color: colors.text, fontWeight: 650 }}>{title}</Typography>
+      {children}
+    </Box>
   );
 }
 
@@ -1172,6 +1656,7 @@ function EmployeeLifecycleDialog({
   onClose,
   onSubmit,
 }) {
+  const colors = useAdminColors();
   if (!user || !action) return null;
 
   const title = {
@@ -1197,10 +1682,10 @@ function EmployeeLifecycleDialog({
   }[action];
 
   return (
-    <Dialog open onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>{title}</DialogTitle>
-      <DialogContent dividers>
-        <Stack spacing={2}>
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: adminRadius.modal, bgcolor: colors.paper } }}>
+      <DialogTitle sx={{ fontWeight: 650 }}>{title}</DialogTitle>
+      <DialogContent dividers sx={{ bgcolor: colors.paperSoft }}>
+        <Stack spacing={1.5}>
           <UserSummary user={user} />
 
           {['view', 'reassign', 'deactivate', 'change-role', 'change-department'].includes(action) && (
@@ -1285,7 +1770,7 @@ function EmployeeLifecycleDialog({
           )}
         </Stack>
       </DialogContent>
-      <DialogActions sx={{ p: 2, flexDirection: { xs: 'column-reverse', sm: 'row' }, alignItems: { xs: 'stretch', sm: 'center' } }}>
+      <DialogActions sx={{ p: 1.75, flexDirection: { xs: 'column-reverse', sm: 'row' }, alignItems: { xs: 'stretch', sm: 'center' }, '& .MuiButton-root': { whiteSpace: 'nowrap' } }}>
         <Button onClick={onClose}>Close</Button>
         {submitLabel && (
           <Button variant="contained" color={action === 'deactivate' ? 'error' : 'primary'} onClick={onSubmit} disabled={isDeactivateBlocked || loadingResponsibilities}>
@@ -1298,12 +1783,13 @@ function EmployeeLifecycleDialog({
 }
 
 function UserSummary({ user }) {
+  const colors = useAdminColors();
   return (
-    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2 }}>
+    <Box sx={{ border: `1px solid ${colors.borderSoft}`, borderRadius: adminRadius.card, p: 1.75, bgcolor: colors.paper }}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ alignItems: { xs: 'flex-start', sm: 'center' } }}>
-        <Avatar sx={{ width: 44, height: 44, bgcolor: '#DBEAFE', color: 'primary.main', fontWeight: 900 }}>{user.full_name?.[0]}</Avatar>
+        <Avatar sx={{ width: 42, height: 42, bgcolor: colors.theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.16)' : '#EFF6FF', color: 'primary.main', fontWeight: 650 }}>{user.full_name?.[0]}</Avatar>
         <Box sx={{ minWidth: 0 }}>
-          <Typography fontWeight={900}>{user.full_name}</Typography>
+          <Typography fontWeight={650}>{user.full_name}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{user.email}</Typography>
           <Stack direction="row" spacing={1} sx={{ mt: 0.75, flexWrap: 'wrap' }}>
             <Chip size="small" label={user.employee_id} />
@@ -1318,10 +1804,11 @@ function UserSummary({ user }) {
 }
 
 function ResponsibilitySummary({ responsibilities, loading }) {
+  const colors = useAdminColors();
   const activeItems = responsibilities.items?.filter((item) => item.count > 0) || [];
   return (
-    <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
-      <Typography fontWeight={900}>Active Responsibility Check</Typography>
+    <Box sx={{ border: `1px solid ${colors.borderSoft}`, borderRadius: adminRadius.card, p: 1.75, bgcolor: colors.paper }}>
+      <Typography fontWeight={650}>Active Responsibility Check</Typography>
       <Typography variant="body2" color="text.secondary">
         {loading ? 'Checking active work...' : activeItems.length ? `${responsibilities.total} active responsibility record(s) must be transferred.` : 'No active responsibilities found.'}
       </Typography>
@@ -1330,7 +1817,7 @@ function ResponsibilitySummary({ responsibilities, loading }) {
           {activeItems.map((item) => (
             <Box key={item.key}>
               <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="body2" fontWeight={850}>{item.label}</Typography>
+                <Typography variant="body2" fontWeight={600}>{item.label}</Typography>
                 <Chip size="small" label={item.count} color="warning" />
               </Stack>
               {item.records?.slice(0, 3).map((record) => (

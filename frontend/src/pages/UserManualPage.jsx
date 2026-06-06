@@ -18,9 +18,10 @@ import {
   Typography,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { BookOpen, CheckCircle2, CircleHelp, Route, Search, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, CircleHelp, Route, Search, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { Page } from '../components/LayoutPrimitives';
+import PageHeader from '../components/PageHeader';
 import { roleLabels } from '../utils/constants';
 
 const statusGuide = [
@@ -260,7 +261,26 @@ export default function UserManualPage() {
   return (
     <Page maxWidth={1480}>
       <Stack spacing={2.5}>
-        <ManualHero manual={manual} roleCode={user?.roleCode} search={search} onSearch={setSearch} />
+        <PageHeader
+          eyebrow="USER MANUAL"
+          title={manual.title}
+          description={manual.subtitle}
+          actions={(
+            <TextField
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search manual content..."
+              sx={{ width: { xs: '100%', md: 360 } }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <Search size={17} />
+                  </InputAdornment>
+                ),
+              }}
+            />
+          )}
+        />
 
         <Grid container spacing={2.25} sx={{ alignItems: 'flex-start' }}>
           <Grid size={{ xs: 12, lg: 8 }}>
@@ -296,61 +316,6 @@ export default function UserManualPage() {
         </Grid>
       </Stack>
     </Page>
-  );
-}
-
-function ManualHero({ manual, roleCode, search, onSearch }) {
-  return (
-    <Box
-      sx={{
-        p: { xs: 2, md: 3 },
-        borderRadius: 3,
-        border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
-        bgcolor: (theme) => theme.custom.semantic.elevated,
-        boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
-      }}
-    >
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' } }}>
-        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start', minWidth: 0 }}>
-          <Box
-            sx={{
-              width: 44,
-              height: 44,
-              borderRadius: 2,
-              display: 'grid',
-              placeItems: 'center',
-              bgcolor: 'primary.main',
-              color: '#FFFFFF',
-              flexShrink: 0,
-            }}
-          >
-            <BookOpen size={22} />
-          </Box>
-          <Box sx={{ minWidth: 0 }}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 0.5 }}>
-              <Typography variant="caption" color="primary.main" fontWeight={900}>User Manual</Typography>
-              <Chip size="small" label={roleLabels[roleCode] || roleCode || 'User'} sx={{ height: 22, borderRadius: 1, fontWeight: 800 }} />
-            </Stack>
-            <Typography variant="h4" sx={{ fontSize: { xs: 26, md: 32 }, overflowWrap: 'anywhere' }}>{manual.title}</Typography>
-            <Typography color="text.secondary" sx={{ mt: 0.7, maxWidth: 760, overflowWrap: 'anywhere' }}>{manual.subtitle}</Typography>
-          </Box>
-        </Stack>
-
-        <TextField
-          value={search}
-          onChange={(event) => onSearch(event.target.value)}
-          placeholder="Search manual content..."
-          sx={{ width: { xs: '100%', md: 360 } }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <Search size={17} />
-              </InputAdornment>
-            ),
-          }}
-        />
-      </Stack>
-    </Box>
   );
 }
 

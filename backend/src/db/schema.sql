@@ -105,6 +105,10 @@ CREATE TABLE IF NOT EXISTS requests (
   business_justification TEXT NOT NULL,
   description TEXT NOT NULL,
   expected_benefits TEXT,
+  roi_type ENUM('TIME_SAVINGS', 'COST_SAVINGS') NULL,
+  roi_hours_saved_per_employee_per_month DECIMAL(10,2) NULL,
+  roi_employees_benefited INT UNSIGNED NULL,
+  roi_monthly_cost_savings_inr DECIMAL(14,2) NULL,
   status ENUM(
     'SUBMITTED',
     'DEPARTMENT_APPROVAL_PENDING',
@@ -169,6 +173,18 @@ ALTER TABLE requests
     'UAT_REJECTED',
     'CLOSED'
   ) NOT NULL DEFAULT 'SUBMITTED';
+
+ALTER TABLE requests
+  ADD COLUMN roi_type ENUM('TIME_SAVINGS', 'COST_SAVINGS') NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_hours_saved_per_employee_per_month DECIMAL(10,2) NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_employees_benefited INT UNSIGNED NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_monthly_cost_savings_inr DECIMAL(14,2) NULL;
 
 CREATE TABLE IF NOT EXISTS assignments (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,

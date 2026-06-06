@@ -27,6 +27,14 @@ import MenuIcon from '@mui/icons-material/Menu';
 import TuneIcon from '@mui/icons-material/Tune';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
+import AssignmentTurnedInOutlinedIcon from '@mui/icons-material/AssignmentTurnedInOutlined';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined';
+import HelpOutlinedIcon from '@mui/icons-material/HelpOutlined';
+import PersonAddAltOutlinedIcon from '@mui/icons-material/PersonAddAltOutlined';
+import ChatBubbleOutlinedIcon from '@mui/icons-material/ChatBubbleOutlined';
+import SyncAltOutlinedIcon from '@mui/icons-material/SyncAltOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import {
   Bell,
   BookOpen,
@@ -47,6 +55,7 @@ import { canAccess, canCreateRequest, routePermissions } from '../auth/permissio
 import { missingReportingAuthorityText, roleLabels } from '../utils/constants';
 import api from '../api/client';
 import { useThemeMode } from '../theme/ThemeModeProvider';
+import { formatRelativeTime, getNotificationMeta } from '../utils/notifications';
 
 const expandedWidth = 244;
 const collapsedWidth = 64;
@@ -65,6 +74,7 @@ const navGroups = [
     label: 'Operations',
     items: [
       { label: 'Work In Progress', path: '/development', icon: Code2, route: '/development' },
+      { label: 'Developer Workload', path: '/developer-workload', icon: Gauge, route: '/developer-workload' },
       { label: 'Review & Validation', path: '/testing', icon: TestTube2, route: '/testing' },
       { label: 'Final Approval', path: '/uat', icon: UserCheck, route: '/uat' },
     ],
@@ -84,6 +94,7 @@ function getRoleAwareNavLabel(item, roleCode) {
   if (item.path === '/requests' && ['DEVELOPER', 'QA', 'UAT_APPROVER'].includes(roleCode)) return 'Assigned Requests';
   if (item.path === '/development' && roleCode === 'DEVELOPER') return 'My Work Queue';
   if (item.path === '/development' && roleCode === 'IT_HEAD') return 'Work Oversight';
+  if (item.path === '/developer-workload') return 'Developer Workload';
   if (item.path === '/testing' && roleCode === 'QA') return 'Pending Review';
   if (item.path === '/testing' && roleCode === 'IT_HEAD') return 'Review Oversight';
   if (item.path === '/uat') return 'Final Approval Queue';
@@ -118,7 +129,8 @@ export default function AppLayout() {
   const visibleNavItems = visibleGroups.flatMap((group) => group.items);
   const effectiveCollapsed = isMobile ? false : collapsed;
   const drawerWidth = effectiveCollapsed ? collapsedWidth : expandedWidth;
-  const unreadCount = notifications.filter((item) => !item.is_read).length;
+  const unreadNotifications = notifications.filter((item) => !item.is_read);
+  const unreadCount = unreadNotifications.length;
   const sidebarBg = theme.palette.mode === 'dark' ? '#111827' : '#F8FAFC';
   const sidebarBorder = theme.palette.mode === 'dark' ? '#253044' : '#D8DEE8';
   const sidebarText = theme.palette.mode === 'dark' ? '#CBD5E1' : '#334155';
@@ -131,8 +143,23 @@ export default function AppLayout() {
     : user?.departmentHeadName || missingReportingAuthorityText;
 
   useEffect(() => {
-    api.get('/notifications?isRead=0').then(setNotifications).catch(() => setNotifications([]));
+    api.get('/notifications').then(setNotifications).catch(() => setNotifications([]));
   }, []);
+
+  async function markNotificationRead(notificationId) {
+    await api.post(`/notifications/${notificationId}/read`);
+    setNotifications((current) => current.map((item) => (
+      item.id === notificationId ? { ...item, is_read: true } : item
+    )));
+  }
+
+  function openNotification(notification) {
+    setNotificationAnchor(null);
+    if (!notification.is_read) {
+      markNotificationRead(notification.id).catch(() => {});
+    }
+    navigate(notification.request_id ? `/requests/${notification.request_id}` : '/notifications');
+  }
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100dvh', width: '100%', overflowX: 'hidden' }}>
@@ -412,23 +439,60 @@ export default function AppLayout() {
         anchorEl={notificationAnchor}
         open={Boolean(notificationAnchor)}
         onClose={() => setNotificationAnchor(null)}
-        PaperProps={{ sx: { width: { xs: 'calc(100vw - 24px)', sm: 380 }, maxWidth: 'calc(100vw - 24px)', borderRadius: 3, mt: 1 } }}
+        MenuListProps={{ sx: { p: 0 } }}
+        PaperProps={{
+          sx: {
+            width: { xs: 'calc(100vw - 24px)', sm: 430 },
+            maxWidth: 'calc(100vw - 24px)',
+            borderRadius: 2,
+            mt: 1,
+            overflow: 'hidden',
+            border: `1px solid ${semantic.borderSoft}`,
+            bgcolor: semantic.elevated,
+            backgroundImage: 'none',
+            boxShadow: theme.palette.mode === 'dark' ? '0 22px 70px rgba(0,0,0,0.42)' : '0 22px 70px rgba(15,23,42,0.16)',
+          },
+        }}
       >
-        <Box px={2} py={1.5}>
-          <Typography variant="subtitle1">Notifications</Typography>
-          <Typography variant="caption" color="text.secondary">{unreadCount} unread items</Typography>
-        </Box>
-        <Divider />
-        {notifications.slice(0, 5).map((item) => (
-          <MenuItem key={item.id} onClick={() => navigate('/notifications')} sx={{ alignItems: 'flex-start', py: 1.5, whiteSpace: 'normal' }}>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="body2" fontWeight={800} sx={{ overflowWrap: 'anywhere' }}>{item.title}</Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{item.message}</Typography>
+        <Stack direction="row" sx={{ px: 2, py: 1.5, alignItems: 'center', justifyContent: 'space-between', borderBottom: `1px solid ${semantic.borderSoft}`, bgcolor: semantic.paper }}>
+          <Box>
+            <Typography variant="subtitle1" fontWeight={900}>Notifications</Typography>
+            <Typography variant="caption" color="text.secondary">{unreadCount} unread item{unreadCount === 1 ? '' : 's'}</Typography>
+          </Box>
+          {unreadCount > 0 && (
+            <Box sx={{ px: 1, py: 0.35, borderRadius: 1, bgcolor: theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.18)' : '#EFF6FF', color: 'primary.main', fontSize: 12, fontWeight: 850 }}>
+              Live
             </Box>
-          </MenuItem>
-        ))}
-        <Divider />
-        <MenuItem onClick={() => navigate('/notifications')}>View notification center</MenuItem>
+          )}
+        </Stack>
+        <Stack spacing={0.75} sx={{ p: 1, maxHeight: 430, overflowY: 'auto', bgcolor: semantic.paperSoft }}>
+          {unreadNotifications.length === 0 ? (
+            <Box sx={{ px: 2, py: 4, textAlign: 'center' }}>
+              <Typography variant="subtitle2" fontWeight={850}>You&apos;re all caught up</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>No pending notifications need your attention.</Typography>
+            </Box>
+          ) : unreadNotifications.slice(0, 8).map((item) => (
+            <NotificationDropdownItem
+              key={item.id}
+              notification={item}
+              onOpen={() => openNotification(item)}
+              onMarkRead={() => markNotificationRead(item.id)}
+            />
+          ))}
+        </Stack>
+        <Box sx={{ p: 1, borderTop: `1px solid ${semantic.borderSoft}`, bgcolor: semantic.paper }}>
+          <Button
+            fullWidth
+            variant="text"
+            onClick={() => {
+              setNotificationAnchor(null);
+              navigate('/notifications');
+            }}
+            sx={{ borderRadius: 1.25, justifyContent: 'center' }}
+          >
+            View Notification Center
+          </Button>
+        </Box>
       </Menu>
 
       <Menu
@@ -454,6 +518,103 @@ export default function AppLayout() {
         <MenuItem onClick={() => navigate('/')}>Dashboard</MenuItem>
         <MenuItem onClick={logout}>Logout</MenuItem>
       </Menu>
+    </Box>
+  );
+}
+
+function getNotificationTone(meta, theme) {
+  const isDark = theme.palette.mode === 'dark';
+  const tones = {
+    warning: { color: '#D97706', bg: isDark ? 'rgba(245,158,11,0.14)' : '#FFFBEB', border: isDark ? 'rgba(245,158,11,0.28)' : '#FDE68A' },
+    success: { color: '#16A34A', bg: isDark ? 'rgba(22,163,74,0.14)' : '#F0FDF4', border: isDark ? 'rgba(34,197,94,0.26)' : '#BBF7D0' },
+    error: { color: '#DC2626', bg: isDark ? 'rgba(220,38,38,0.14)' : '#FEF2F2', border: isDark ? 'rgba(248,113,113,0.28)' : '#FECACA' },
+    info: { color: '#0284C7', bg: isDark ? 'rgba(2,132,199,0.16)' : '#F0F9FF', border: isDark ? 'rgba(56,189,248,0.28)' : '#BAE6FD' },
+    primary: { color: '#2563EB', bg: isDark ? 'rgba(37,99,235,0.16)' : '#EFF6FF', border: isDark ? 'rgba(96,165,250,0.30)' : '#BFDBFE' },
+    neutral: { color: isDark ? '#CBD5E1' : '#475569', bg: isDark ? 'rgba(148,163,184,0.12)' : '#F8FAFC', border: isDark ? 'rgba(148,163,184,0.22)' : '#E2E8F0' },
+  };
+  return tones[meta.tone] || tones.neutral;
+}
+
+function NotificationTypeIcon({ meta }) {
+  const iconProps = { sx: { fontSize: 17 } };
+  if (meta.label.includes('Approval Required')) return <AssignmentTurnedInOutlinedIcon {...iconProps} />;
+  if (meta.label.includes('Approved')) return <CheckCircleIcon {...iconProps} />;
+  if (meta.label.includes('Rejected')) return <CancelOutlinedIcon {...iconProps} />;
+  if (meta.label.includes('Clarification')) return <HelpOutlinedIcon {...iconProps} />;
+  if (meta.label.includes('Assigned')) return <PersonAddAltOutlinedIcon {...iconProps} />;
+  if (meta.label.includes('Comment')) return <ChatBubbleOutlinedIcon {...iconProps} />;
+  if (meta.label.includes('Status')) return <SyncAltOutlinedIcon {...iconProps} />;
+  return <InfoOutlinedIcon {...iconProps} />;
+}
+
+function NotificationDropdownItem({ notification, onOpen, onMarkRead }) {
+  const theme = useTheme();
+  const semantic = theme.custom.semantic;
+  const meta = getNotificationMeta(notification);
+  const tone = getNotificationTone(meta, theme);
+  const unread = !notification.is_read;
+
+  return (
+    <Box
+      component="button"
+      type="button"
+      onClick={onOpen}
+      sx={{
+        width: '100%',
+        textAlign: 'left',
+        border: '1px solid',
+        borderColor: unread ? tone.border : semantic.borderSoft,
+        borderLeft: unread ? `3px solid ${tone.color}` : `3px solid transparent`,
+        borderRadius: 1.5,
+        p: 1.15,
+        bgcolor: unread ? (theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.09)' : '#FFFFFF') : semantic.paper,
+        color: 'text.primary',
+        cursor: 'pointer',
+        transition: 'background-color 140ms ease, border-color 140ms ease',
+        '&:hover': {
+          bgcolor: theme.palette.mode === 'dark' ? 'rgba(148,163,184,0.10)' : '#F8FAFC',
+          borderColor: unread ? tone.border : semantic.border,
+        },
+      }}
+    >
+      <Stack direction="row" spacing={1.15} sx={{ alignItems: 'flex-start' }}>
+        <Box sx={{ width: 30, height: 30, borderRadius: 1.25, display: 'grid', placeItems: 'center', flexShrink: 0, color: tone.color, bgcolor: tone.bg, border: `1px solid ${tone.border}` }}>
+          <NotificationTypeIcon meta={meta} />
+        </Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', justifyContent: 'space-between', minWidth: 0 }}>
+            <Typography variant="body2" fontWeight={880} noWrap>{meta.label}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{formatRelativeTime(notification.created_at)}</Typography>
+          </Stack>
+          <Typography variant="caption" color="primary.main" fontWeight={850} sx={{ display: 'block', mt: 0.2 }}>
+            {notification.request_number || 'System'}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.15, lineHeight: 1.35, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {notification.message || notification.title}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.65, justifyContent: 'space-between' }}>
+            <Typography variant="caption" color="text.secondary" noWrap>{notification.title}</Typography>
+            {unread ? (
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
+                <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: tone.color }} />
+                <Typography
+                  component="span"
+                  variant="caption"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onMarkRead();
+                  }}
+                  sx={{ color: 'primary.main', fontWeight: 850 }}
+                >
+                  Mark read
+                </Typography>
+              </Stack>
+            ) : (
+              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>Read</Typography>
+            )}
+          </Stack>
+        </Box>
+      </Stack>
     </Box>
   );
 }

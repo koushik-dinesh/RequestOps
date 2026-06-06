@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { formatEnum, missingReportingAuthorityText, priorities, requestTypes } from '../utils/constants';
 import { Page } from '../components/LayoutPrimitives';
+import PageHeader from '../components/PageHeader';
 
 const DRAFT_KEY = 'requestops.createRequestDraft';
 
@@ -22,6 +23,10 @@ const emptyForm = {
   businessJustification: '',
   description: '',
   expectedBenefits: '',
+  roiType: '',
+  roiHoursSavedPerEmployeePerMonth: '',
+  roiEmployeesBenefited: '',
+  roiMonthlyCostSavingsInr: '',
 };
 
 const workflowSteps = [
@@ -84,6 +89,10 @@ function cleanRequestPayload(form) {
     businessJustification: form.businessJustification.trim(),
     description: form.description.trim(),
     expectedBenefits: form.expectedBenefits.trim() || null,
+    roiType: form.roiType || null,
+    roiHoursSavedPerEmployeePerMonth: form.roiType === 'TIME_SAVINGS' ? Number(form.roiHoursSavedPerEmployeePerMonth || 0) : null,
+    roiEmployeesBenefited: form.roiType === 'TIME_SAVINGS' ? Number(form.roiEmployeesBenefited || 0) : null,
+    roiMonthlyCostSavingsInr: form.roiType === 'COST_SAVINGS' ? Number(form.roiMonthlyCostSavingsInr || 0) : null,
   };
 }
 
@@ -91,7 +100,21 @@ function validateRequestPayload(payload) {
   if (payload.title.length < 5) return 'Request title must be at least 5 characters.';
   if (payload.businessJustification.length < 5) return 'Business justification must be at least 5 characters.';
   if (payload.description.length < 10) return 'Detailed description must be at least 10 characters.';
+  if (payload.roiType === 'TIME_SAVINGS' && (!payload.roiHoursSavedPerEmployeePerMonth || !payload.roiEmployeesBenefited)) return 'Enter both time savings ROI values.';
+  if (payload.roiType === 'COST_SAVINGS' && !payload.roiMonthlyCostSavingsInr) return 'Enter monthly cost savings for ROI.';
   return '';
+}
+
+function calculateAnnualRoi(form) {
+  if (form.roiType === 'TIME_SAVINGS') {
+    const monthly = Number(form.roiHoursSavedPerEmployeePerMonth || 0) * Number(form.roiEmployeesBenefited || 0);
+    return { monthly, annual: monthly * 12, label: `${monthly.toLocaleString('en-IN')} monthly hours / ${(monthly * 12).toLocaleString('en-IN')} annual hours` };
+  }
+  if (form.roiType === 'COST_SAVINGS') {
+    const annual = Number(form.roiMonthlyCostSavingsInr || 0) * 12;
+    return { annual, label: `₹${annual.toLocaleString('en-IN')} annual savings` };
+  }
+  return { annual: 0, label: 'Select ROI type to calculate value' };
 }
 
 function formatApiError(err) {
@@ -117,6 +140,7 @@ export default function RequestCreatePage() {
     () => files.reduce((total, file) => total + file.size, 0),
     [files],
   );
+  const roi = useMemo(() => calculateAnnualRoi(form), [form]);
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -180,28 +204,11 @@ export default function RequestCreatePage() {
   return (
     <Page maxWidth={1460}>
       <Stack spacing={2}>
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={1.5}
-          sx={{
-            minHeight: { md: 82 },
-            justifyContent: 'space-between',
-            alignItems: { xs: 'flex-start', md: 'center' },
-          }}
-        >
-          <Box>
-            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', mb: 0.5 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={760}>Requests</Typography>
-              <Typography variant="caption" color="text.secondary">/</Typography>
-              <Typography variant="caption" color="primary.main" fontWeight={820}>Create Request</Typography>
-            </Stack>
-            <Typography variant="h4" sx={{ fontSize: { xs: 26, md: 30 } }}>Create Request</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.35 }}>
-              Submit a new software request
-            </Typography>
-          </Box>
-
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', maxWidth: '100%', flexWrap: 'wrap' }}>
+        <PageHeader
+          eyebrow="REQUEST MANAGEMENT"
+          title="Create Request"
+          description="Submit a new software requirement request for review, approval, and delivery."
+          actions={(
             <Chip
               size="small"
               label="Department approval starts after submit"
@@ -216,8 +223,8 @@ export default function RequestCreatePage() {
                 py: 0.4,
               }}
             />
-          </Stack>
-        </Stack>
+          )}
+        />
 
         <Grid container spacing={2.5} sx={{ alignItems: 'flex-start' }}>
           <Grid size={{ xs: 12, lg: 8.7 }}>
@@ -342,6 +349,49 @@ export default function RequestCreatePage() {
                   minRows={3}
                   placeholder="Examples: reduced manual effort, improved controls, faster approvals, better reporting."
                 />
+
+                <Box
+                  sx={{
+                    p: 2,
+                    borderRadius: 2,
+                    border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
+                    bgcolor: (theme) => theme.custom.semantic.paperSoft,
+                  }}
+                >
+                  <Typography variant="subtitle2" fontWeight={820}>ROI Information</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Estimate measurable business value for approval review.
+                  </Typography>
+                  <Grid container spacing={1.5} sx={{ mt: 1 }}>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <TextField select label="ROI Type" value={form.roiType} onChange={(e) => update('roiType', e.target.value)} fullWidth>
+                        <MenuItem value="">Not specified</MenuItem>
+                        <MenuItem value="TIME_SAVINGS">Time Savings</MenuItem>
+                        <MenuItem value="COST_SAVINGS">Cost Savings</MenuItem>
+                      </TextField>
+                    </Grid>
+                    {form.roiType === 'TIME_SAVINGS' && (
+                      <>
+                        <Grid size={{ xs: 12, md: 4 }}>
+                          <TextField label="Hours Saved Per Employee Per Month" type="number" value={form.roiHoursSavedPerEmployeePerMonth} onChange={(e) => update('roiHoursSavedPerEmployeePerMonth', e.target.value)} fullWidth />
+                        </Grid>
+                        <Grid size={{ xs: 12, md: 4 }}>
+                          <TextField label="Employees Benefited" type="number" value={form.roiEmployeesBenefited} onChange={(e) => update('roiEmployeesBenefited', e.target.value)} fullWidth />
+                        </Grid>
+                      </>
+                    )}
+                    {form.roiType === 'COST_SAVINGS' && (
+                      <Grid size={{ xs: 12, md: 4 }}>
+                        <TextField label="Monthly Cost Savings (INR)" type="number" value={form.roiMonthlyCostSavingsInr} onChange={(e) => update('roiMonthlyCostSavingsInr', e.target.value)} fullWidth />
+                      </Grid>
+                    )}
+                    <Grid size={{ xs: 12 }}>
+                      <Alert severity="info" sx={{ py: 0.5 }}>
+                        {roi.label}
+                      </Alert>
+                    </Grid>
+                  </Grid>
+                </Box>
 
                 <Box>
                   <Stack

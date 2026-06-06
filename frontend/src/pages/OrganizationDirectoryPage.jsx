@@ -28,6 +28,7 @@ import TableRowsIcon from '@mui/icons-material/TableRows';
 import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import api from '../api/client';
 import { Page } from '../components/LayoutPrimitives';
+import PageHeader from '../components/PageHeader';
 import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
 
 const viewModes = [
@@ -149,18 +150,17 @@ export default function OrganizationDirectoryPage() {
   return (
     <Page maxWidth={1560}>
       <Stack spacing={2}>
-        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', lg: 'center' } }}>
-          <Box>
-            <Typography variant="h4" sx={{ fontSize: { xs: 28, md: 32 } }}>Organization Directory</Typography>
-            <Typography color="text.secondary" variant="body2">
-              Browse employees, departments, reporting structure, and contact information.
-            </Typography>
-          </Box>
+        <PageHeader
+          eyebrow="ORGANIZATION"
+          title="Organization Directory"
+          description="Explore company teams, reporting relationships, and directory information."
+          actions={(
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ flexWrap: 'wrap', width: { xs: '100%', lg: 'auto' } }}>
             <Button variant="outlined" startIcon={<DownloadIcon />} onClick={exportDirectory}>Export Directory</Button>
             <Button variant="contained" onClick={load}>Refresh</Button>
           </Stack>
-        </Stack>
+          )}
+        />
 
         <Box
           sx={{

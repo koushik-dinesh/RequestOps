@@ -20,6 +20,7 @@ import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { canCreateRequest, canUseAdminConsole } from '../auth/permissions';
 import { Page } from '../components/LayoutPrimitives';
+import PageHeader from '../components/PageHeader';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -109,7 +110,18 @@ export default function DashboardPage() {
   return (
     <Page maxWidth={1520}>
       <Stack spacing={3}>
-        <DashboardHeader firstName={firstName} today={today} roleCode={user?.roleCode} />
+        <PageHeader
+          eyebrow="WORKSPACE"
+          title="Dashboard"
+          description={`Welcome back, ${firstName}. ${today}`}
+          actions={(
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
+              {canCreateRequest(user?.roleCode) && <Button component={Link} to="/requests/new" variant="contained" startIcon={<Plus size={16} />}>Create Request</Button>}
+              {canUseAdminConsole(user?.roleCode) && <Button component={Link} to="/admin" variant="outlined" startIcon={<Building2 size={16} />}>Add Department</Button>}
+              {canUseAdminConsole(user?.roleCode) && <Button component={Link} to="/admin" variant="outlined" startIcon={<UserPlus size={16} />}>Add User</Button>}
+            </Stack>
+          )}
+        />
 
         <Grid container spacing={1.75}>
           {kpiCards.map((card) => (
@@ -119,7 +131,7 @@ export default function DashboardPage() {
           ))}
         </Grid>
 
-        <Panel title="Recent Activity Feed" subtitle="Latest request and access events">
+        <Panel title="Recent Activity Feed">
           <ActivityFeed rows={activityItems} />
         </Panel>
 
@@ -128,12 +140,12 @@ export default function DashboardPage() {
         ) : (
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, xl: 8 }}>
-              <Panel title="Department Overview" subtitle="Management visibility by business function">
+              <Panel title="Department Overview">
                 <DepartmentOverview rows={byDepartment} />
               </Panel>
             </Grid>
             <Grid size={{ xs: 12, xl: 4 }}>
-              <Panel title="Work Progress" subtitle="Current completion across active work">
+              <Panel title="Work Progress">
                 <DevelopmentProgressOverview requests={developmentRequests.slice(0, 6)} />
               </Panel>
             </Grid>
@@ -157,34 +169,6 @@ export default function DashboardPage() {
         )}
       </Stack>
     </Page>
-  );
-}
-
-function DashboardHeader({ firstName, today, roleCode }) {
-  return (
-    <Box
-      sx={{
-        px: { xs: 2.5, md: 3 },
-        py: 2.25,
-        borderRadius: 3,
-        border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
-        bgcolor: (theme) => theme.custom.semantic.elevated,
-      }}
-    >
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ alignItems: { xs: 'flex-start', md: 'center' }, justifyContent: 'space-between' }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontSize: { xs: 26, md: 30 } }}>Welcome back, {firstName}</Typography>
-          <Stack direction="row" spacing={1.5} sx={{ mt: 0.75, alignItems: 'center' }}>
-            <Typography color="text.secondary" variant="body2">{today}</Typography>
-          </Stack>
-        </Box>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
-          {canCreateRequest(roleCode) && <Button component={Link} to="/requests/new" variant="contained" startIcon={<Plus size={16} />}>Create Request</Button>}
-          {canUseAdminConsole(roleCode) && <Button component={Link} to="/admin" variant="outlined" startIcon={<Building2 size={16} />}>Add Department</Button>}
-          {canUseAdminConsole(roleCode) && <Button component={Link} to="/admin" variant="outlined" startIcon={<UserPlus size={16} />}>Add User</Button>}
-        </Stack>
-      </Stack>
-    </Box>
   );
 }
 
