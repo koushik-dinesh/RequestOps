@@ -3,7 +3,6 @@ import {
   Alert,
   Box,
   Button,
-  Divider,
   IconButton,
   Link,
   Stack,
@@ -39,8 +38,8 @@ export default function LoginPage() {
   const { mode, toggleMode } = useThemeMode();
   const semantic = theme.custom.semantic;
   const navigate = useNavigate();
-  const [email, setEmail] = useState('admin@violin.local');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
 
@@ -61,7 +60,7 @@ export default function LoginPage() {
   function handleForgotPassword(event) {
     event.preventDefault();
     setError('');
-    setInfo('For this internal demo, password resets are handled by the RequestOps System Admin.');
+    setInfo('Please contact your RequestOps system administrator to reset your password.');
   }
 
   return (
@@ -175,10 +174,6 @@ export default function LoginPage() {
             </Button>
           </Stack>
 
-          <Divider sx={{ my: 4 }} />
-          <Typography variant="caption" color="text.secondary">
-            Internal Violin platform. Demo users use password <strong>Password123!</strong>
-          </Typography>
         </Box>
       </Box>
 

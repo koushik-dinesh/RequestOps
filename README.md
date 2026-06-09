@@ -1,53 +1,105 @@
 # RequestOps
 
-RequestOps is an internal Violin software requirement and change request management system. It includes a React/Material UI frontend, Express API, JWT authentication, MySQL schema, role-aware dashboards, request workflow, comments, attachments, notifications, and audit logs.
+RequestOps is an enterprise workflow management platform developed for Violin Technologies to streamline software requirement requests, approvals, development tracking, testing, deployment, and closure processes.
+
+The platform provides a centralized workflow for managing requests across departments while maintaining complete auditability, approval history, notifications, reporting, and ROI tracking.
+
+## Features
+
+- Software Request Management
+- Multi-Level Approval Workflow
+- Department & Role Management
+- IT Review & Assignment
+- Sprint & Development Tracking
+- QA & UAT Management
+- Deployment Tracking
+- ROI & Business Impact Tracking
+- Email Notifications
+- Audit Logs & Activity Tracking
+- ISMS Project Closure Reports
+- Role-Based Access Control
+
+## Technology Stack
+
+### Frontend
+- React.js
+- Material UI
+- Vite
+
+### Backend
+- FastAPI
+- JWT Authentication
+
+### Database
+- MySQL
 
 ## Prerequisites
 
 - Node.js 18+
+- Python 3.11+
 - MySQL 8+
 
-## Setup
+## Installation
 
-```bash
-cp .env.example .env
-npm install
-npm run db:migrate
-npm run db:seed
-npm run dev
-```
+bash cp .env.example .env npm install npm run db:migrate npm run db:seed npm run dev 
 
-Frontend: `http://localhost:5173`
+## Database Setup
 
-Backend health check: `http://localhost:4000/health`
+bash npm run db:migrate npm run db:seed 
 
-## Demo Users
+The seed process initializes required master data including roles, departments, workflow configurations, and application settings.
 
-All seeded users use password `Password123!`.
+## Core Workflow
 
-- `admin@violin.local` - System Admin
-- `finance.head@violin.local` - Department Head
-- `it.head@violin.local` - IT Head
-- `developer@violin.local` - Developer
-- `qa@violin.local` - QA
-- `uat@violin.local` - UAT Approver
-- `john.smith@violin.local` - Employee
+Employee Request Submission
+
+→ Department Head Review
+
+→ IT Review
+
+→ Resource Assignment
+
+→ Requirements Approval
+
+→ Sprint Planning
+
+→ Development
+
+→ QA Testing
+
+→ User Acceptance Testing (UAT)
+
+→ Deployment
+
+→ Request Closure
+
+→ ISMS Report Generation
 
 ## Key Scripts
 
-- `npm run dev` - run API and web app together.
-- `npm run dev:api` - run Express API only.
-- `npm run dev:web` - run Vite frontend only.
-- `npm run db:migrate` - create the MySQL database and schema.
-- `npm run db:seed` - seed roles, departments, demo users, sample requests, notifications, and timeline data.
-- `npm run build` - build the frontend bundle.
+- npm run dev
+- npm run build
+- npm run db:migrate
+- npm run db:seed
 
-## Demo Flow
+## Security
 
-1. Login as `john.smith@violin.local` and create a request.
-2. Login as `finance.head@violin.local` and approve or request clarification.
-3. Login as `it.head@violin.local`, complete IT review, and assign Developer/QA.
-4. Login as `developer@violin.local`, start development, update progress, and complete development.
-5. Login as `qa@violin.local` and submit test results.
-6. Login as `uat@violin.local` and approve UAT to close the request.
-7. Login as `admin@violin.local` to review registrations, users, departments, notifications, and full request visibility.
+- JWT Authentication
+- Role-Based Access Control
+- Audit Logging
+- Attachment Security
+- Email Verification & Notifications
+
+## Reporting
+
+- Request Lifecycle Tracking
+- ROI & Business Impact Reporting
+- Approval History
+- ISMS Project Closure Reports
+- Audit Trail Reporting
+
+## Developed For
+
+Violin Technologies
+
+RequestOps Workflow Management Platform
