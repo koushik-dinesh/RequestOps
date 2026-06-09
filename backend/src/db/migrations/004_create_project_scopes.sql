@@ -6,8 +6,6 @@ CREATE TABLE IF NOT EXISTS project_scopes (
   business_objectives TEXT NULL,
   in_scope TEXT NULL,
   out_of_scope TEXT NULL,
-  assumptions TEXT NULL,
-  dependencies TEXT NULL,
   status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REWORK_REQUIRED') NOT NULL DEFAULT 'DRAFT',
   created_by_user_id BIGINT UNSIGNED NOT NULL,
   reviewed_by_user_id BIGINT UNSIGNED NULL,

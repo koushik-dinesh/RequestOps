@@ -36,7 +36,7 @@ def directory(db: Session = Depends(get_db)):
         LEFT JOIN users active_users ON active_users.department_id = d.id AND active_users.status = 'ACTIVE'
         LEFT JOIN requests pending_requests
           ON pending_requests.requester_department_id = d.id
-         AND pending_requests.status IN ('DEPARTMENT_APPROVAL_PENDING', 'CLARIFICATION_REQUESTED', 'IT_REVIEW_PENDING', 'ASSIGNMENT_PENDING', 'PM_ASSIGNED', 'SCOPE_REVIEW', 'USER_STORY_REVIEW', 'DEVELOPER_ASSIGNED', 'SPRINT_PLANNING', 'ASSIGNED', 'IN_DEVELOPMENT', 'QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'IN_TESTING', 'UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'DEPLOYMENT_PENDING', 'DEPLOYED')
+         AND pending_requests.status IN ('DEPARTMENT_APPROVAL_PENDING', 'CLARIFICATION_REQUESTED', 'IT_REVIEW_PENDING', 'ASSIGNMENT_PENDING', 'PM_ASSIGNED', 'SCOPE_REVIEW', 'USER_STORY_REVIEW', 'DEVELOPER_ASSIGNED', 'SPRINT_PLANNING', 'ASSIGNED', 'IN_DEVELOPMENT', 'QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'IN_TESTING', 'UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'DEPLOYMENT_PENDING', 'DEPLOYED', 'READY_FOR_COMPLETION')
         WHERE d.status = 'ACTIVE'
         GROUP BY d.id, d.name, d.code, d.description, d.status, d.department_head_user_id, head.full_name, head.email
         ORDER BY d.name

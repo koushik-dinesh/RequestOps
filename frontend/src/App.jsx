@@ -18,7 +18,6 @@ import {
   ProjectManagerDashboardPage,
   ScopeManagementPage,
   SprintManagementPage,
-  SprintTaskBoardPage,
   UserStoryManagementPage,
 } from './pages/ProjectManagerWorkspacePage';
 
@@ -47,9 +46,6 @@ export default function App() {
           </Route>
           <Route element={<RoleRoute roles={routePermissions['/sprints']} />}>
             <Route path="/sprints" element={<SprintManagementPage />} />
-          </Route>
-          <Route element={<RoleRoute roles={routePermissions['/sprint-board']} />}>
-            <Route path="/sprint-board" element={<SprintTaskBoardPage />} />
           </Route>
           <Route element={<RoleRoute roles={routePermissions['/development']} />}>
             <Route path="/development" element={<RequestsPage presetStatus="IN_DEVELOPMENT" />} />

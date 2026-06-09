@@ -62,7 +62,30 @@ def approve_registration(
         raise ApiError(404, "Registration not found.")
     if registration["status"] != "PENDING_APPROVAL":
         raise ApiError(409, "Registration has already been reviewed.")
+    existing_user = one(db, """
+        SELECT id, employee_id, email
+        FROM users
+        WHERE employee_id = :employeeId OR email = :email
+        LIMIT 1
+    """, {"employeeId": registration["employee_id"], "email": registration["email"]})
+    if existing_user:
+        raise ApiError(409, "A user already exists with this employee ID or email.")
+    approved_registration = one(db, """
+        SELECT id
+        FROM user_registrations
+        WHERE id <> :id
+          AND status = 'APPROVED'
+          AND (employee_id = :employeeId OR email = :email)
+        LIMIT 1
+    """, {"id": registration_id, "employeeId": registration["employee_id"], "email": registration["email"]})
+    if approved_registration:
+        raise ApiError(409, "This employee ID or email has already been approved in another registration.")
     department = one(db, "SELECT department_head_user_id FROM departments WHERE id = :departmentId", {"departmentId": payload.departmentId})
+    if not department:
+        raise ApiError(400, "Choose a valid department before approval.")
+    role = one(db, "SELECT id FROM roles WHERE id = :roleId AND is_active = TRUE", {"roleId": payload.roleId})
+    if not role:
+        raise ApiError(400, "Choose a valid active role before approval.")
     reporting_manager_user_id = department.get("department_head_user_id") if department else None
     created = execute(
         db,

@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     smtp_from: str = Field(default="requestops@localhost", alias="SMTP_FROM")
     smtp_tls: bool = Field(default=True, alias="SMTP_TLS")
     email_log_path: str = Field(default="backend/email.log", alias="EMAIL_LOG_PATH")
+    email_logo_path: str = Field(default="backend/app/assets/violin-technologies-logo.png", alias="EMAIL_LOGO_PATH")
 
     @property
     def database_url(self) -> str:

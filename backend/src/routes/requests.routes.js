@@ -4,7 +4,7 @@ const path = require('path');
 const { z } = require('zod');
 const env = require('../config/env');
 const { query, transaction } = require('../config/database');
-const { audit, notify, notifyRole } = require('../lib/activity');
+const { audit, notify } = require('../lib/activity');
 const { getRequestById, transitionRequest } = require('../lib/workflow');
 const { ApiError, asyncHandler, ok } = require('../lib/http');
 const { authenticate } = require('../middleware/auth');
@@ -91,6 +91,56 @@ async function getCurrentDepartmentHeadId(departmentId) {
     { departmentId },
   );
   return rows[0]?.department_head_user_id || null;
+}
+
+async function getActiveUserWithRole(userId, roleCode) {
+  if (!userId) return null;
+  const rows = await query(
+    `SELECT u.id, u.full_name, u.email, r.code AS role_code
+     FROM users u
+     JOIN roles r ON r.id = u.role_id
+     WHERE u.id = :userId AND r.code = :roleCode AND u.status = 'ACTIVE'`,
+    { userId, roleCode },
+  );
+  return rows[0] || null;
+}
+
+async function resolveSingleActiveRoleOwner(roleCode, label) {
+  const candidates = await query(
+    `SELECT u.id
+     FROM users u
+     JOIN roles r ON r.id = u.role_id
+     WHERE r.code = :roleCode AND u.status = 'ACTIVE'
+     ORDER BY u.employee_id, u.id`,
+    { roleCode },
+  );
+  if (!candidates.length) throw new ApiError(409, `No active ${label} is configured.`);
+  return candidates[0].id;
+}
+
+async function resolveRequestItHeadId(request) {
+  const existingOwner = await getActiveUserWithRole(request.it_head_user_id, 'IT_HEAD');
+  if (existingOwner) return existingOwner.id;
+  const currentOwner = await getActiveUserWithRole(request.current_assignee_user_id, 'IT_HEAD');
+  if (currentOwner) return currentOwner.id;
+  return resolveSingleActiveRoleOwner('IT_HEAD', 'IT HOD');
+}
+
+async function resolveRequestUatApproverId(request) {
+  const currentOwner = await getActiveUserWithRole(request.current_assignee_user_id, 'UAT_APPROVER');
+  if (currentOwner) return currentOwner.id;
+  const departmentCandidates = await query(
+    `SELECT u.id
+     FROM users u
+     JOIN roles r ON r.id = u.role_id
+     WHERE r.code = 'UAT_APPROVER'
+       AND u.status = 'ACTIVE'
+       AND u.department_id = :departmentId`,
+    { departmentId: request.requester_department_id },
+  );
+  if (departmentCandidates.length === 1) return departmentCandidates[0].id;
+  if (departmentCandidates.length > 1) throw new ApiError(409, 'Multiple active UAT approvers are configured for this department.');
+  return resolveSingleActiveRoleOwner('UAT_APPROVER', 'UAT approver');
 }
 
 async function assertCanActAsDepartmentHead(req, request) {
@@ -227,6 +277,8 @@ router.get('/', asyncHandler(async (req, res) => {
   } else if (!isAdminOrIT(req.user)) {
     if (role === 'DEPARTMENT_HEAD') {
       filters.push('(r.department_head_user_id = :userId OR r.requester_department_id = :userDepartmentId)');
+    } else if (role === 'PROJECT_MANAGER') {
+      filters.push('r.project_manager_user_id = :userId');
     } else if (role === 'DEVELOPER') {
       filters.push('a.developer_user_id = :userId');
     } else if (role === 'QA') {
@@ -281,11 +333,11 @@ router.post('/', asyncHandler(async (req, res) => {
     : [];
   if (!reportingAuthorityRows[0]) throw new ApiError(409, missingReportingAuthorityMessage);
 
-  const now = new Date();
-  const year = now.getFullYear();
   const created = await transaction(async (connection) => {
-    const [counterRows] = await connection.execute('SELECT COUNT(*) + 1 AS next_number FROM requests WHERE YEAR(created_at) = ?', [year]);
-    const requestNumber = `REQ-${year}-${String(counterRows[0].next_number).padStart(6, '0')}`;
+    const [counterRows] = await connection.execute(
+      "SELECT COALESCE(MAX(CAST(SUBSTRING(request_number, 4) AS UNSIGNED)), 0) + 1 AS next_number FROM requests WHERE request_number REGEXP '^RQ-[0-9]{3}$'",
+    );
+    const requestNumber = `RQ-${String(counterRows[0].next_number).padStart(3, '0')}`;
     const [result] = await connection.execute(
       `INSERT INTO requests
         (request_number, title, request_type, priority, business_justification, description, expected_benefits,
@@ -379,8 +431,8 @@ async function updateRequestDetails(req, res) {
   if (request.requester_user_id !== req.user.id && req.user.role_code !== 'SYSTEM_ADMIN') {
     throw new ApiError(403, 'Only the requester can update request details.');
   }
-  if (request.status !== 'CLARIFICATION_REQUESTED') {
-    throw new ApiError(409, 'Request details can only be updated while clarification is requested.');
+  if (!['SUBMITTED', 'DEPARTMENT_APPROVAL_PENDING', 'CLARIFICATION_REQUESTED'].includes(request.status)) {
+    throw new ApiError(409, 'Request details can only be edited before review progresses beyond department approval.');
   }
   const body = z.object({
     title: z.string().min(5),
@@ -403,7 +455,20 @@ async function updateRequestDetails(req, res) {
       expectedBenefits: body.expectedBenefits || null,
     },
   );
-  await audit({ actorUserId: req.user.id, action: 'REQUEST_DETAILS_UPDATED_FOR_CLARIFICATION', entityType: 'REQUEST', entityId: request.id, newValue: body, req });
+  await audit({
+    actorUserId: req.user.id,
+    action: 'REQUEST_DETAILS_UPDATED',
+    entityType: 'REQUEST',
+    entityId: request.id,
+    oldValue: {
+      title: request.title,
+      businessJustification: request.business_justification,
+      description: request.description,
+      expectedBenefits: request.expected_benefits,
+    },
+    newValue: { ...body, status: request.status },
+    req,
+  });
   ok(res, await getRequestById(request.id));
 }
 
@@ -543,6 +608,7 @@ router.get('/:id/attachments/:attachmentId/download', asyncHandler(async (req, r
 router.post('/:id/department-approval/approve', asyncHandler(async (req, res) => {
   const request = await assertRequestAccess(req, req.params.id, ['DEPARTMENT_HEAD']);
   const departmentHeadUserId = await assertCanActAsDepartmentHead(req, request);
+  const itHeadUserId = await resolveRequestItHeadId(request);
   const body = z.object({ comment: z.string().optional() }).parse(req.body);
   await addComment(request.id, req.user.id, 'APPROVAL', body.comment);
   const updated = await transitionRequest({
@@ -551,9 +617,10 @@ router.post('/:id/department-approval/approve', asyncHandler(async (req, res) =>
     actorUserId: req.user.id,
     comment: body.comment || 'Department approved.',
     req,
-    patch: { department_head_user_id: departmentHeadUserId, current_assignee_user_id: null },
+    patch: { department_head_user_id: departmentHeadUserId, it_head_user_id: itHeadUserId, current_assignee_user_id: itHeadUserId },
   });
-  await notifyRole('IT_HEAD', {
+  await notify({
+    recipientUserId: itHeadUserId,
     requestId: request.id,
     type: 'REQUEST_IT_REVIEW_PENDING',
     title: 'Request awaiting internal review',
@@ -644,7 +711,7 @@ router.post('/:id/it-review/approve', asyncHandler(async (req, res) => {
     requestId: request.id,
     toStatus: 'ASSIGNMENT_PENDING',
     actorUserId: req.user.id,
-    comment: body.comment || 'Internal review approved. Request moved to waiting for assignment.',
+    comment: body.comment || 'Internal review approved. Project Manager assignment is required.',
     req,
     patch: {
       it_head_user_id: req.user.id,
@@ -659,9 +726,9 @@ router.post('/:id/it-review/approve', asyncHandler(async (req, res) => {
   await notify({
     recipientUserId: req.user.id,
     requestId: request.id,
-    type: 'REQUEST_ASSIGNMENT_PENDING',
-    title: 'Waiting for assignment',
-    message: `${request.request_number} is approved and ready for team assignment.`,
+    type: 'PROJECT_MANAGER_ASSIGNMENT_PENDING',
+    title: 'Project Manager assignment required',
+    message: `${request.request_number} is approved by IT and needs a Project Manager.`,
   });
   ok(res, updated);
 }));
@@ -696,6 +763,50 @@ router.post('/:id/it-review/defer', asyncHandler(async (req, res) => {
   const body = z.object({ comment: z.string().min(3) }).parse(req.body);
   await addComment(request.id, req.user.id, 'GENERAL', body.comment, true);
   const updated = await transitionRequest({ requestId: request.id, toStatus: 'DEFERRED', actorUserId: req.user.id, comment: body.comment, req });
+  ok(res, updated);
+}));
+
+router.post('/:id/project-manager/assign', asyncHandler(async (req, res) => {
+  const request = await assertRequestAccess(req, req.params.id, ['IT_HEAD']);
+  if (!['ASSIGNMENT_PENDING', 'PM_ASSIGNED'].includes(request.status)) {
+    throw new ApiError(409, 'Project Manager can only be assigned after IT HOD approval.');
+  }
+  const body = z.object({
+    projectManagerUserId: z.coerce.number().int().positive(),
+    notes: z.string().optional(),
+  }).parse(req.body);
+  const projectManager = await getActiveUserWithRole(body.projectManagerUserId, 'PROJECT_MANAGER');
+  if (!projectManager) {
+    throw new ApiError(400, 'Project Manager must be an active Project Manager.');
+  }
+  const previousProjectManagerUserId = request.project_manager_user_id || null;
+  const updated = await transitionRequest({
+    requestId: request.id,
+    toStatus: 'PM_ASSIGNED',
+    actorUserId: req.user.id,
+    comment: body.notes || `Project Manager assigned: ${projectManager.full_name}.`,
+    req,
+    patch: {
+      project_manager_user_id: body.projectManagerUserId,
+      current_assignee_user_id: body.projectManagerUserId,
+    },
+  });
+  await notify({
+    recipientUserId: body.projectManagerUserId,
+    requestId: request.id,
+    type: 'PROJECT_MANAGER_ASSIGNED',
+    title: 'Project assigned to you',
+    message: `${request.request_number} is assigned to you for scope and delivery planning.`,
+  });
+  await audit({
+    actorUserId: req.user.id,
+    action: 'PROJECT_MANAGER_ASSIGNED',
+    entityType: 'REQUEST',
+    entityId: request.id,
+    oldValue: { projectManagerUserId: previousProjectManagerUserId },
+    newValue: { projectManagerUserId: body.projectManagerUserId },
+    req,
+  });
   ok(res, updated);
 }));
 
@@ -881,10 +992,7 @@ router.post('/:id/testing/result', asyncHandler(async (req, res) => {
   );
   await addComment(request.id, req.user.id, 'TESTING', body.testSummary, true);
   if (body.result === 'PASS') {
-    const uatUsers = await query(
-      `SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id WHERE r.code = 'UAT_APPROVER' AND u.status = 'ACTIVE' ORDER BY u.id LIMIT 1`,
-    );
-    const uatUserId = uatUsers[0]?.id || null;
+    const uatUserId = await resolveRequestUatApproverId(request);
     const updated = await transitionRequest({ requestId: request.id, toStatus: 'UAT_PENDING', actorUserId: req.user.id, comment: body.testSummary, req, patch: { current_assignee_user_id: uatUserId } });
     await notify({ recipientUserId: uatUserId, requestId: request.id, type: 'UAT_PENDING', title: 'Final approval pending', message: `${request.request_number} is ready for final approval.` });
     return ok(res, updated);

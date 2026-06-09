@@ -8,7 +8,6 @@ import {
   Collapse,
   Grid,
   MenuItem,
-  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -29,6 +28,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import api from '../api/client';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
+import { useToast } from '../components/ToastProvider';
 import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
 
 const viewModes = [
@@ -38,13 +38,13 @@ const viewModes = [
 ];
 
 export default function OrganizationDirectoryPage() {
+  const { showToast } = useToast();
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [viewMode, setViewMode] = useState('hierarchy');
   const [expandedDepartments, setExpandedDepartments] = useState(new Set());
-  const [copied, setCopied] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
     departmentId: '',
@@ -112,7 +112,7 @@ export default function OrganizationDirectoryPage() {
 
   async function copyEmail(email) {
     await navigator.clipboard?.writeText(email);
-    setCopied(true);
+    showToast('Email copied successfully.');
   }
 
   function toggleDepartment(departmentId) {
@@ -236,12 +236,6 @@ export default function OrganizationDirectoryPage() {
         )}
       </Stack>
 
-      <Snackbar
-        open={copied}
-        autoHideDuration={2200}
-        onClose={() => setCopied(false)}
-        message="Email copied successfully."
-      />
     </Page>
   );
 }

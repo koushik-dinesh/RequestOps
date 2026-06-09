@@ -107,7 +107,14 @@ CREATE TABLE IF NOT EXISTS requests (
   expected_benefits TEXT,
   roi_type ENUM('TIME_SAVINGS', 'COST_SAVINGS') NULL,
   roi_hours_saved_per_employee_per_month DECIMAL(10,2) NULL,
+  roi_users_impacted INT UNSIGNED NULL,
+  roi_time_saved_per_task DECIMAL(10,2) NULL,
+  roi_time_saved_unit ENUM('MINUTES', 'HOURS') NULL,
+  roi_occurrences_per_month INT UNSIGNED NULL,
   roi_employees_benefited INT UNSIGNED NULL,
+  roi_estimated_hourly_cost_inr DECIMAL(14,2) NULL,
+  roi_estimated_revenue_impact_inr DECIMAL(14,2) NULL,
+  roi_business_impact_category ENUM('PRODUCTIVITY_IMPROVEMENT', 'COST_REDUCTION', 'REVENUE_INCREASE', 'PROCESS_AUTOMATION', 'COMPLIANCE', 'QUALITY_IMPROVEMENT', 'CUSTOMER_SATISFACTION') NULL,
   roi_monthly_cost_savings_inr DECIMAL(14,2) NULL,
   status ENUM(
     'SUBMITTED',
@@ -129,15 +136,23 @@ CREATE TABLE IF NOT EXISTS requests (
     'PM_ASSIGNED',
     'SCOPE_REVIEW',
     'USER_STORY_REVIEW',
+    'REQUIREMENTS_DEPARTMENT_REVIEW',
+    'REQUIREMENTS_PM_REVIEW',
+    'REQUIREMENTS_IT_REVIEW',
+    'REQUIREMENTS_CLARIFICATION_REQUESTED',
+    'REQUIREMENTS_APPROVED',
     'DEVELOPER_ASSIGNED',
     'SPRINT_PLANNING',
+    'SPRINT_CREATED',
+    'SPRINT_ACTIVE',
     'QA_PENDING',
     'QA_FAILED',
     'QA_PASSED',
     'UAT_FAILED',
     'UAT_APPROVED',
     'DEPLOYMENT_PENDING',
-    'DEPLOYED'
+    'DEPLOYED',
+    'READY_FOR_COMPLETION'
   ) NOT NULL DEFAULT 'SUBMITTED',
   requester_user_id BIGINT UNSIGNED NOT NULL,
   requester_department_id BIGINT UNSIGNED NOT NULL,
@@ -190,15 +205,23 @@ ALTER TABLE requests
     'PM_ASSIGNED',
     'SCOPE_REVIEW',
     'USER_STORY_REVIEW',
+    'REQUIREMENTS_DEPARTMENT_REVIEW',
+    'REQUIREMENTS_PM_REVIEW',
+    'REQUIREMENTS_IT_REVIEW',
+    'REQUIREMENTS_CLARIFICATION_REQUESTED',
+    'REQUIREMENTS_APPROVED',
     'DEVELOPER_ASSIGNED',
     'SPRINT_PLANNING',
+    'SPRINT_CREATED',
+    'SPRINT_ACTIVE',
     'QA_PENDING',
     'QA_FAILED',
     'QA_PASSED',
     'UAT_FAILED',
     'UAT_APPROVED',
     'DEPLOYMENT_PENDING',
-    'DEPLOYED'
+    'DEPLOYED',
+    'READY_FOR_COMPLETION'
   ) NOT NULL DEFAULT 'SUBMITTED';
 
 ALTER TABLE requests
@@ -208,7 +231,28 @@ ALTER TABLE requests
   ADD COLUMN roi_hours_saved_per_employee_per_month DECIMAL(10,2) NULL;
 
 ALTER TABLE requests
+  ADD COLUMN roi_users_impacted INT UNSIGNED NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_time_saved_per_task DECIMAL(10,2) NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_time_saved_unit ENUM('MINUTES', 'HOURS') NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_occurrences_per_month INT UNSIGNED NULL;
+
+ALTER TABLE requests
   ADD COLUMN roi_employees_benefited INT UNSIGNED NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_estimated_hourly_cost_inr DECIMAL(14,2) NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_estimated_revenue_impact_inr DECIMAL(14,2) NULL;
+
+ALTER TABLE requests
+  ADD COLUMN roi_business_impact_category ENUM('PRODUCTIVITY_IMPROVEMENT', 'COST_REDUCTION', 'REVENUE_INCREASE', 'PROCESS_AUTOMATION', 'COMPLIANCE', 'QUALITY_IMPROVEMENT', 'CUSTOMER_SATISFACTION') NULL;
 
 ALTER TABLE requests
   ADD COLUMN roi_monthly_cost_savings_inr DECIMAL(14,2) NULL;
@@ -216,16 +260,19 @@ ALTER TABLE requests
 CREATE TABLE IF NOT EXISTS assignments (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   request_id BIGINT UNSIGNED NOT NULL,
-  developer_user_id BIGINT UNSIGNED NOT NULL,
-  qa_user_id BIGINT UNSIGNED NOT NULL,
+  developer_user_id BIGINT UNSIGNED NULL,
+  qa_user_id BIGINT UNSIGNED NULL,
   assigned_by_user_id BIGINT UNSIGNED NOT NULL,
+  qa_assigned_by_user_id BIGINT UNSIGNED NULL,
   assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  qa_assigned_at TIMESTAMP NULL,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   notes TEXT,
   CONSTRAINT fk_assignments_request FOREIGN KEY (request_id) REFERENCES requests(id),
   CONSTRAINT fk_assignments_developer FOREIGN KEY (developer_user_id) REFERENCES users(id),
   CONSTRAINT fk_assignments_qa FOREIGN KEY (qa_user_id) REFERENCES users(id),
   CONSTRAINT fk_assignments_assigned_by FOREIGN KEY (assigned_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_assignments_qa_assigned_by FOREIGN KEY (qa_assigned_by_user_id) REFERENCES users(id),
   INDEX idx_assignments_request (request_id),
   INDEX idx_assignments_developer (developer_user_id),
   INDEX idx_assignments_qa (qa_user_id),
@@ -315,8 +362,6 @@ CREATE TABLE IF NOT EXISTS project_scopes (
   business_objectives TEXT NULL,
   in_scope TEXT NULL,
   out_of_scope TEXT NULL,
-  assumptions TEXT NULL,
-  dependencies TEXT NULL,
   status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REWORK_REQUIRED') NOT NULL DEFAULT 'DRAFT',
   created_by_user_id BIGINT UNSIGNED NOT NULL,
   reviewed_by_user_id BIGINT UNSIGNED NULL,
@@ -365,15 +410,19 @@ CREATE TABLE IF NOT EXISTS sprints (
   end_date DATE NULL,
   estimated_hours DECIMAL(10,2) NULL,
   actual_hours DECIMAL(10,2) NULL,
-  status ENUM('PLANNED', 'CREATED', 'ACTIVE', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PLANNED',
+  notes TEXT NULL,
+  status ENUM('PLANNED', 'CREATED', 'ACTIVE', 'BLOCKED', 'COMPLETED', 'CANCELLED') NOT NULL DEFAULT 'PLANNED',
+  assigned_developer_user_id BIGINT UNSIGNED NULL,
   created_by_user_id BIGINT UNSIGNED NOT NULL,
   started_at TIMESTAMP NULL,
   completed_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_sprints_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_sprints_assigned_developer FOREIGN KEY (assigned_developer_user_id) REFERENCES users(id),
   CONSTRAINT fk_sprints_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
   INDEX idx_sprints_request_status (request_id, status),
+  INDEX idx_sprints_assigned_developer (assigned_developer_user_id),
   INDEX idx_sprints_created_by (created_by_user_id),
   INDEX idx_sprints_dates (start_date, end_date)
 );
@@ -382,21 +431,140 @@ CREATE TABLE IF NOT EXISTS sprint_tasks (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   sprint_id BIGINT UNSIGNED NOT NULL,
   user_story_id BIGINT UNSIGNED NULL,
+  task_key VARCHAR(80) NULL,
   title VARCHAR(255) NOT NULL,
   description TEXT NULL,
   assigned_developer_user_id BIGINT UNSIGNED NULL,
   estimate_hours DECIMAL(10,2) NULL,
   actual_hours DECIMAL(10,2) NULL,
+  progress_percentage TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  blocked_reason TEXT NULL,
+  due_date DATE NULL,
   priority ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'MEDIUM',
   status ENUM('TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED') NOT NULL DEFAULT 'TODO',
+  created_by_user_id BIGINT UNSIGNED NULL,
+  started_at TIMESTAMP NULL,
+  completed_at TIMESTAMP NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_sprint_tasks_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id),
   CONSTRAINT fk_sprint_tasks_user_story FOREIGN KEY (user_story_id) REFERENCES user_stories(id),
   CONSTRAINT fk_sprint_tasks_developer FOREIGN KEY (assigned_developer_user_id) REFERENCES users(id),
+  CONSTRAINT fk_sprint_tasks_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  UNIQUE KEY uq_sprint_tasks_task_key (sprint_id, task_key),
   INDEX idx_sprint_tasks_sprint_status (sprint_id, status),
   INDEX idx_sprint_tasks_story (user_story_id),
-  INDEX idx_sprint_tasks_developer (assigned_developer_user_id)
+  INDEX idx_sprint_tasks_developer (assigned_developer_user_id),
+  INDEX idx_sprint_tasks_developer_status (assigned_developer_user_id, status)
+);
+
+CREATE TABLE IF NOT EXISTS sprint_task_status_history (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT UNSIGNED NOT NULL,
+  from_status ENUM('TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED') NULL,
+  to_status ENUM('TODO', 'IN_PROGRESS', 'BLOCKED', 'DONE', 'CANCELLED') NOT NULL,
+  changed_by_user_id BIGINT UNSIGNED NOT NULL,
+  comment TEXT NULL,
+  changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sprint_task_history_task FOREIGN KEY (task_id) REFERENCES sprint_tasks(id),
+  CONSTRAINT fk_sprint_task_history_user FOREIGN KEY (changed_by_user_id) REFERENCES users(id),
+  INDEX idx_sprint_task_history_task (task_id, changed_at),
+  INDEX idx_sprint_task_history_user (changed_by_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS sprint_task_comments (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  comment_type ENUM('GENERAL', 'PROGRESS', 'BLOCKER', 'COMPLETION') NOT NULL DEFAULT 'GENERAL',
+  comment_text TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sprint_task_comments_task FOREIGN KEY (task_id) REFERENCES sprint_tasks(id),
+  CONSTRAINT fk_sprint_task_comments_user FOREIGN KEY (user_id) REFERENCES users(id),
+  INDEX idx_sprint_task_comments_task (task_id, created_at),
+  INDEX idx_sprint_task_comments_user (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS requirement_revisions (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  request_id BIGINT UNSIGNED NOT NULL,
+  revision_number INT UNSIGNED NOT NULL,
+  status ENUM('DRAFT', 'UNDER_DEPARTMENT_REVIEW', 'UNDER_PM_REVIEW', 'UNDER_IT_REVIEW', 'CLARIFICATION_REQUESTED', 'APPROVED', 'SUPERSEDED') NOT NULL DEFAULT 'DRAFT',
+  pending_reviewer_role_code ENUM('DEPARTMENT_HEAD', 'IT_HEAD', 'PROJECT_MANAGER') NULL,
+  created_by_user_id BIGINT UNSIGNED NOT NULL,
+  submitted_by_user_id BIGINT UNSIGNED NULL,
+  submitted_at TIMESTAMP NULL,
+  approved_at TIMESTAMP NULL,
+  superseded_at TIMESTAMP NULL,
+  change_summary TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_requirement_revisions_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_requirement_revisions_created_by FOREIGN KEY (created_by_user_id) REFERENCES users(id),
+  CONSTRAINT fk_requirement_revisions_submitted_by FOREIGN KEY (submitted_by_user_id) REFERENCES users(id),
+  UNIQUE KEY uq_requirement_revisions_request_number (request_id, revision_number),
+  INDEX idx_requirement_revisions_request_status (request_id, status),
+  INDEX idx_requirement_revisions_pending_role (pending_reviewer_role_code)
+);
+
+CREATE TABLE IF NOT EXISTS requirement_artifact_snapshots (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  revision_id BIGINT UNSIGNED NOT NULL,
+  request_id BIGINT UNSIGNED NOT NULL,
+  artifact_type ENUM('SCOPE', 'USER_STORY') NOT NULL,
+  artifact_id BIGINT UNSIGNED NOT NULL,
+  content_json JSON NOT NULL,
+  content_hash CHAR(64) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_requirement_snapshots_revision FOREIGN KEY (revision_id) REFERENCES requirement_revisions(id),
+  CONSTRAINT fk_requirement_snapshots_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  UNIQUE KEY uq_requirement_snapshots_artifact (revision_id, artifact_type, artifact_id),
+  INDEX idx_requirement_snapshots_request (request_id),
+  INDEX idx_requirement_snapshots_hash (content_hash)
+);
+
+CREATE TABLE IF NOT EXISTS requirement_reviews (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  revision_id BIGINT UNSIGNED NOT NULL,
+  request_id BIGINT UNSIGNED NOT NULL,
+  reviewer_role_code ENUM('DEPARTMENT_HEAD', 'PROJECT_MANAGER', 'IT_HEAD') NOT NULL,
+  reviewer_user_id BIGINT UNSIGNED NULL,
+  decision ENUM('PENDING', 'APPROVED', 'CHANGES_REQUESTED') NOT NULL DEFAULT 'PENDING',
+  comments TEXT NULL,
+  decided_at TIMESTAMP NULL,
+  invalidated_at TIMESTAMP NULL,
+  invalidated_by_revision_id BIGINT UNSIGNED NULL,
+  is_current BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_requirement_reviews_revision FOREIGN KEY (revision_id) REFERENCES requirement_revisions(id),
+  CONSTRAINT fk_requirement_reviews_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_requirement_reviews_reviewer FOREIGN KEY (reviewer_user_id) REFERENCES users(id),
+  CONSTRAINT fk_requirement_reviews_invalidated_by FOREIGN KEY (invalidated_by_revision_id) REFERENCES requirement_revisions(id),
+  UNIQUE KEY uq_requirement_reviews_revision_role (revision_id, reviewer_role_code),
+  INDEX idx_requirement_reviews_request_current (request_id, is_current),
+  INDEX idx_requirement_reviews_decision (decision)
+);
+
+CREATE TABLE IF NOT EXISTS requirement_change_logs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  revision_id BIGINT UNSIGNED NOT NULL,
+  request_id BIGINT UNSIGNED NOT NULL,
+  artifact_type ENUM('SCOPE', 'USER_STORY', 'REQUIREMENTS') NOT NULL,
+  artifact_id BIGINT UNSIGNED NULL,
+  changed_by_user_id BIGINT UNSIGNED NOT NULL,
+  change_type ENUM('CREATED', 'UPDATED', 'SUBMITTED', 'APPROVED', 'CHANGES_REQUESTED', 'CLARIFICATION_REQUESTED', 'CLARIFICATION_RESPONDED', 'INVALIDATED') NOT NULL,
+  field_name VARCHAR(100) NULL,
+  old_value TEXT NULL,
+  new_value TEXT NULL,
+  change_summary TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_requirement_changes_revision FOREIGN KEY (revision_id) REFERENCES requirement_revisions(id),
+  CONSTRAINT fk_requirement_changes_request FOREIGN KEY (request_id) REFERENCES requests(id),
+  CONSTRAINT fk_requirement_changes_user FOREIGN KEY (changed_by_user_id) REFERENCES users(id),
+  INDEX idx_requirement_changes_revision (revision_id, created_at),
+  INDEX idx_requirement_changes_request (request_id, created_at),
+  INDEX idx_requirement_changes_user (changed_by_user_id)
 );
 
 CREATE TABLE IF NOT EXISTS development_updates (

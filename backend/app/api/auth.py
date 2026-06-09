@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,34 @@ from app.utils.http import ApiError, ok
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def next_employee_id(db: Session) -> str:
+    result = one(
+        db,
+        """
+        SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next_number
+        FROM (
+            SELECT CAST(SUBSTRING(employee_id, 5) AS UNSIGNED) AS sequence_number
+            FROM users
+            WHERE employee_id REGEXP '^VIO-[0-9]{4}$'
+            UNION ALL
+            SELECT CAST(SUBSTRING(employee_id, 5) AS UNSIGNED) AS sequence_number
+            FROM user_registrations
+            WHERE employee_id REGEXP '^VIO-[0-9]{4}$'
+        ) employee_sequences
+        """,
+    )
+    return f"VIO-{int(result['next_number']):04d}"
+
+
+def normalize_employee_id(db: Session, employee_id: str | None) -> str:
+    normalized = (employee_id or "").strip().upper()
+    if not normalized:
+        return next_employee_id(db)
+    if not re.fullmatch(r"VIO-\d{4}", normalized):
+        raise ApiError(400, "Employee ID must use the VIO-0001 format.")
+    return normalized
 
 
 @router.get("/providers")
@@ -33,12 +63,18 @@ def designations():
     ])
 
 
+@router.get("/next-employee-id")
+def next_employee_id_endpoint(db: Session = Depends(get_db)):
+    return ok({"employeeId": next_employee_id(db)})
+
+
 @router.post("/register")
 def register(payload: RegisterPayload, request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    employee_id = normalize_employee_id(db, payload.employeeId)
     existing_users = rows(
         db,
         "SELECT id FROM users WHERE email = :email OR employee_id = :employeeId",
-        {"email": payload.email, "employeeId": payload.employeeId},
+        {"email": payload.email, "employeeId": employee_id},
     )
     if existing_users:
         raise ApiError(409, "A user already exists with this email or employee ID.")
@@ -48,7 +84,7 @@ def register(payload: RegisterPayload, request: Request, background_tasks: Backg
         SELECT id FROM user_registrations
         WHERE (email = :email OR employee_id = :employeeId) AND status = 'PENDING_APPROVAL'
         """,
-        {"email": payload.email, "employeeId": payload.employeeId},
+        {"email": payload.email, "employeeId": employee_id},
     )
     if existing_registrations:
         raise ApiError(409, "Registration is already pending approval.")
@@ -60,7 +96,7 @@ def register(payload: RegisterPayload, request: Request, background_tasks: Backg
         VALUES (:employeeId, :fullName, :email, :mobileNumber, :designation, :departmentId, :passwordHash)
         """,
         {
-            "employeeId": payload.employeeId,
+            "employeeId": employee_id,
             "fullName": payload.fullName,
             "email": payload.email,
             "mobileNumber": payload.mobileNumber,
@@ -88,7 +124,7 @@ def register(payload: RegisterPayload, request: Request, background_tasks: Backg
         request=request,
     )
     db.commit()
-    return ok({"id": registration_id, "status": "PENDING_APPROVAL"}, 201)
+    return ok({"id": registration_id, "employeeId": employee_id, "status": "PENDING_APPROVAL"}, 201)
 
 
 @router.post("/login")

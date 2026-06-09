@@ -12,7 +12,7 @@ const router = express.Router();
 
 const registerSchema = z.object({
   fullName: z.string().min(2),
-  employeeId: z.string().min(2),
+  employeeId: z.string().optional().nullable(),
   email: z.string().email(),
   mobileNumber: z.string().min(5).optional().nullable(),
   designation: z.string().min(2),
@@ -23,6 +23,31 @@ const registerSchema = z.object({
   message: 'Passwords do not match.',
   path: ['confirmPassword'],
 });
+
+async function nextEmployeeId() {
+  const rows = await query(
+    `SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next_number
+     FROM (
+       SELECT CAST(SUBSTRING(employee_id, 5) AS UNSIGNED) AS sequence_number
+       FROM users
+       WHERE employee_id REGEXP '^VIO-[0-9]{4}$'
+       UNION ALL
+       SELECT CAST(SUBSTRING(employee_id, 5) AS UNSIGNED) AS sequence_number
+       FROM user_registrations
+       WHERE employee_id REGEXP '^VIO-[0-9]{4}$'
+     ) employee_sequences`,
+  );
+  return `VIO-${String(rows[0].next_number).padStart(4, '0')}`;
+}
+
+async function normalizeEmployeeId(employeeId) {
+  const normalized = String(employeeId || '').trim().toUpperCase();
+  if (!normalized) return nextEmployeeId();
+  if (!/^VIO-\d{4}$/.test(normalized)) {
+    throw new ApiError(400, 'Employee ID must use the VIO-0001 format.');
+  }
+  return normalized;
+}
 
 function signTokens(user) {
   const payload = {
@@ -56,18 +81,23 @@ router.get('/designations', asyncHandler(async (_req, res) => {
   ]);
 }));
 
+router.get('/next-employee-id', asyncHandler(async (_req, res) => {
+  ok(res, { employeeId: await nextEmployeeId() });
+}));
+
 router.post('/register', asyncHandler(async (req, res) => {
   const body = registerSchema.parse(req.body);
+  const employeeId = await normalizeEmployeeId(body.employeeId);
   const existingUsers = await query(
     'SELECT id FROM users WHERE email = :email OR employee_id = :employeeId',
-    { email: body.email, employeeId: body.employeeId },
+    { email: body.email, employeeId },
   );
   if (existingUsers.length) throw new ApiError(409, 'A user already exists with this email or employee ID.');
 
   const existingRegistrations = await query(
     `SELECT id FROM user_registrations
      WHERE (email = :email OR employee_id = :employeeId) AND status = 'PENDING_APPROVAL'`,
-    { email: body.email, employeeId: body.employeeId },
+    { email: body.email, employeeId },
   );
   if (existingRegistrations.length) throw new ApiError(409, 'Registration is already pending approval.');
 
@@ -77,7 +107,7 @@ router.post('/register', asyncHandler(async (req, res) => {
       (employee_id, full_name, email, mobile_number, designation, requested_department_id, password_hash)
      VALUES (:employeeId, :fullName, :email, :mobileNumber, :designation, :departmentId, :passwordHash)`,
     {
-      employeeId: body.employeeId,
+      employeeId,
       fullName: body.fullName,
       email: body.email,
       mobileNumber: body.mobileNumber || null,
@@ -102,7 +132,7 @@ router.post('/register', asyncHandler(async (req, res) => {
     req,
   });
 
-  ok(res, { id: result.insertId, status: 'PENDING_APPROVAL' }, 201);
+  ok(res, { id: result.insertId, employeeId, status: 'PENDING_APPROVAL' }, 201);
 }));
 
 router.post('/login', asyncHandler(async (req, res) => {

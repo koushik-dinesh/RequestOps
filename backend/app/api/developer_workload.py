@@ -24,6 +24,7 @@ ACTIVE_WORK_STATUSES = [
     "UAT_FAILED",
     "UAT_REJECTED",
     "DEPLOYMENT_PENDING",
+    "READY_FOR_COMPLETION",
 ]
 WORKLOAD_THRESHOLDS = {
     "availableMax": 3,
@@ -56,15 +57,16 @@ def list_developer_workload(user: dict = Depends(get_current_user), db: Session 
             u.email,
             u.department_id,
             d.name AS department_name,
-            COUNT(DISTINCT r.id) AS active_request_count,
-            SUM(CASE WHEN r.status IN ('IN_DEVELOPMENT', 'QA_FAILED', 'UAT_FAILED') THEN 1 ELSE 0 END) AS in_development_count,
-            SUM(CASE WHEN r.status IN ('QA_PENDING', 'IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS in_testing_count,
-            SUM(CASE WHEN r.status IN ('DEVELOPMENT_COMPLETE', 'QA_PENDING', 'IN_TESTING', 'TEST_FAILED') THEN 1 ELSE 0 END) AS qa_pending_count
+            COUNT(task.id) AS active_request_count,
+            SUM(CASE WHEN task.status = 'IN_PROGRESS' THEN 1 ELSE 0 END) AS in_development_count,
+            SUM(CASE WHEN task.status = 'BLOCKED' THEN 1 ELSE 0 END) AS in_testing_count,
+            SUM(CASE WHEN r.status = 'DEVELOPMENT_COMPLETE' THEN 1 ELSE 0 END) AS qa_pending_count
         FROM users u
         JOIN roles role ON role.id = u.role_id
         LEFT JOIN departments d ON d.id = u.department_id
-        LEFT JOIN assignments a ON a.developer_user_id = u.id AND a.is_active = TRUE
-        LEFT JOIN requests r ON r.id = a.request_id AND r.status IN ({active_status_sql()})
+        LEFT JOIN sprint_tasks task ON task.assigned_developer_user_id = u.id AND task.status IN ('TODO', 'IN_PROGRESS', 'BLOCKED')
+        LEFT JOIN sprints sprint ON sprint.id = task.sprint_id
+        LEFT JOIN requests r ON r.id = sprint.request_id AND r.status IN ({active_status_sql()})
         WHERE role.code = 'DEVELOPER' AND u.status = 'ACTIVE'
         GROUP BY u.id, u.employee_id, u.full_name, u.email, u.department_id, d.name
         ORDER BY active_request_count DESC, u.full_name
@@ -73,21 +75,27 @@ def list_developer_workload(user: dict = Depends(get_current_user), db: Session 
     developer_ids = [row["id"] for row in developers]
     assignment_rows = rows(db, f"""
         SELECT
-            a.developer_user_id,
-            a.assigned_at,
+            task.assigned_developer_user_id AS developer_user_id,
+            task.created_at AS assigned_at,
             r.id AS request_id,
             r.request_number,
             r.title,
             r.status,
             r.priority,
             r.updated_at,
+            task.task_key,
+            task.title AS task_title,
+            task.status AS task_status,
             qa.full_name AS qa_name
-        FROM assignments a
-        JOIN requests r ON r.id = a.request_id
+        FROM sprint_tasks task
+        JOIN sprints sprint ON sprint.id = task.sprint_id
+        JOIN requests r ON r.id = sprint.request_id
+        LEFT JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE
         LEFT JOIN users qa ON qa.id = a.qa_user_id
-        WHERE a.is_active = TRUE
+        WHERE task.assigned_developer_user_id IS NOT NULL
+          AND task.status IN ('TODO', 'IN_PROGRESS', 'BLOCKED')
           AND r.status IN ({active_status_sql()})
-        ORDER BY a.assigned_at DESC, r.updated_at DESC
+        ORDER BY task.created_at DESC, r.updated_at DESC
     """) if developer_ids else []
 
     assignments_by_developer: dict[int, list[dict]] = {}

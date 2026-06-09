@@ -9,10 +9,16 @@ export const notificationFilters = [
 ];
 
 const notificationTypeRules = [
-  { match: ['APPROVAL', 'AWAITING_APPROVAL', 'IT_REVIEW_PENDING', 'UAT_PENDING', 'USER_STORIES_REVIEW'], label: 'Approval Required', category: 'APPROVALS', tone: 'warning' },
+  { match: ['REQUIREMENTS_REVIEW_PENDING', 'REQUIREMENTS_APPROVAL_INVALIDATED', 'APPROVAL', 'AWAITING_APPROVAL', 'IT_REVIEW_PENDING', 'UAT_PENDING', 'USER_STORIES_REVIEW'], label: 'Approval Required', category: 'APPROVALS', tone: 'warning' },
+  { match: ['REQUIREMENTS_FULLY_APPROVED', 'REQUIREMENTS_APPROVED_BY_REVIEWER'], label: 'Requirements Approved', category: 'APPROVALS', tone: 'success' },
   { match: ['APPROVED', 'CLOSED'], label: 'Approved', category: 'APPROVALS', tone: 'success' },
   { match: ['REJECTED', 'FAILED'], label: 'Rejected', category: 'APPROVALS', tone: 'error' },
-  { match: ['CLARIFICATION'], label: 'Clarification Received', category: 'CLARIFICATIONS', tone: 'info' },
+  { match: ['REQUIREMENTS_CLARIFICATION', 'CLARIFICATION'], label: 'Clarification Received', category: 'CLARIFICATIONS', tone: 'info' },
+  { match: ['SPRINT_TASK_ASSIGNED'], label: 'Sprint Task Assigned', category: 'ASSIGNMENTS', tone: 'primary' },
+  { match: ['SPRINT_TASK_BLOCKED'], label: 'Task Blocked', category: 'SYSTEM', tone: 'warning' },
+  { match: ['SPRINT_TASK_COMPLETED'], label: 'Task Completed', category: 'SYSTEM', tone: 'success' },
+  { match: ['SPRINT_STARTED'], label: 'Sprint Started', category: 'SYSTEM', tone: 'primary' },
+  { match: ['SPRINT_COMPLETED'], label: 'Sprint Completed', category: 'SYSTEM', tone: 'success' },
   { match: ['PROJECT_MANAGER_ASSIGNED', 'ASSIGNED', 'ASSIGNMENT'], label: 'Assignment', category: 'ASSIGNMENTS', tone: 'primary' },
   { match: ['COMMENT'], label: 'Comment Added', category: 'COMMENTS', tone: 'neutral' },
   { match: ['STATUS', 'PROGRESS', 'DEVELOPMENT', 'TESTING', 'QA', 'UAT', 'SCOPE', 'SPRINT', 'DEPLOYMENT'], label: 'Status Changed', category: 'SYSTEM', tone: 'primary' },

@@ -174,15 +174,25 @@ export default function AdminPage() {
       setError('Choose a confirmed department and role before approval.');
       return;
     }
-    await api.post(`/admin/registrations/${registrationId}/approve`, payload);
-    setMessage('Registration approved.');
-    await load();
+    try {
+      setError('');
+      await api.post(`/admin/registrations/${registrationId}/approve`, payload);
+      setMessage('Registration approved.');
+      await load();
+    } catch (err) {
+      setError(err.message || 'Unable to approve registration.');
+    }
   }
 
   async function reject(registrationId) {
-    await api.post(`/admin/registrations/${registrationId}/reject`, { reason: 'Rejected by admin during review.' });
-    setMessage('Registration rejected.');
-    await load();
+    try {
+      setError('');
+      await api.post(`/admin/registrations/${registrationId}/reject`, { reason: 'Rejected by admin during review.' });
+      setMessage('Registration rejected.');
+      await load();
+    } catch (err) {
+      setError(err.message || 'Unable to reject registration.');
+    }
   }
 
   async function createDepartment(event) {
@@ -1543,6 +1553,9 @@ function AddEmployeeDrawer({ open, departments, onClose, onCreated, onError }) {
         confirmPassword: 'Password123!',
       });
       setSubmitting(false);
+      api.get('/auth/next-employee-id')
+        .then((result) => setForm((current) => ({ ...current, employeeId: result.employeeId || '' })))
+        .catch(() => {});
     }
   }, [open]);
 
@@ -1578,7 +1591,7 @@ function AddEmployeeDrawer({ open, departments, onClose, onCreated, onError }) {
           <DrawerSection title="Basic Information">
             <Grid container spacing={1.5}>
               <Grid size={{ xs: 12, md: 6 }}><TextField label="Full Name" value={form.fullName} onChange={(e) => setField('fullName', e.target.value)} required fullWidth /></Grid>
-              <Grid size={{ xs: 12, md: 6 }}><TextField label="Employee ID" value={form.employeeId} onChange={(e) => setField('employeeId', e.target.value)} required fullWidth /></Grid>
+              <Grid size={{ xs: 12, md: 6 }}><TextField label="Employee ID" value={form.employeeId} onChange={(e) => setField('employeeId', e.target.value.toUpperCase())} helperText="Auto-generated using VIO-0001 format." required fullWidth /></Grid>
               <Grid size={{ xs: 12, md: 6 }}><TextField label="Email" type="email" value={form.email} onChange={(e) => setField('email', e.target.value)} required fullWidth /></Grid>
               <Grid size={{ xs: 12, md: 6 }}><TextField label="Mobile Number" value={form.mobileNumber} onChange={(e) => setField('mobileNumber', e.target.value)} fullWidth /></Grid>
             </Grid>
@@ -1605,7 +1618,7 @@ function AddEmployeeDrawer({ open, departments, onClose, onCreated, onError }) {
 
           <DrawerSection title="Reporting Structure">
             <Alert severity="info">
-              Reported To is resolved from the selected department head during approval. If no department head exists, configure one in Department Management before routing requests.
+              Reporting Manager is resolved from the selected department head during approval. If no department head exists, configure one in Department Management before routing requests.
             </Alert>
           </DrawerSection>
 
@@ -1719,7 +1732,7 @@ function EmployeeLifecycleDialog({
                 <SelectField label="New Department" value={form.departmentId || ''} options={departments.filter((item) => item.status === 'ACTIVE')} getLabel={(item) => item.name} onChange={(value) => onChange('departmentId', value)} />
               </Grid>
               <Grid size={{ xs: 12, md: 6 }}>
-                <SelectField label="New Reported To" value={form.reportingManagerUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => item.full_name} onChange={(value) => onChange('reportingManagerUserId', value)} />
+                <SelectField label="New Reporting Manager" value={form.reportingManagerUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => item.full_name} onChange={(value) => onChange('reportingManagerUserId', value)} />
               </Grid>
               {activeResponsibilities.some((item) => item.key === 'departmentHead') && (
                 <Grid size={{ xs: 12, md: 6 }}>
@@ -1730,7 +1743,7 @@ function EmployeeLifecycleDialog({
           )}
 
           {action === 'change-manager' && (
-            <SelectField label="New Reported To" value={form.reportingManagerUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => onChange('reportingManagerUserId', value)} />
+            <SelectField label="New Reporting Manager" value={form.reportingManagerUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => onChange('reportingManagerUserId', value)} />
           )}
 
           {action === 'reassign' && (
@@ -1764,7 +1777,7 @@ function EmployeeLifecycleDialog({
                 <SelectField label="Role" value={form.roleId || ''} options={roles} getLabel={(role) => role.name} onChange={(value) => onChange('roleId', value)} />
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <SelectField label="Reported To" value={form.reportingManagerUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => onChange('reportingManagerUserId', value)} />
+                <SelectField label="Reporting Manager" value={form.reportingManagerUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => onChange('reportingManagerUserId', value)} />
               </Grid>
             </Grid>
           )}
@@ -1840,7 +1853,7 @@ function ReassignmentFields({ user, form, responsibilities, reportingAuthorities
     <Grid container spacing={2}>
       {(has('departmentHead') || has('reportedTo')) && (
         <Grid size={{ xs: 12, md: 6 }}>
-          <SelectField label="New Department Head / Reported To" value={form.departmentHeadUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => onChange('departmentHeadUserId', value)} />
+          <SelectField label="New Department Head / Reporting Manager" value={form.departmentHeadUserId || ''} options={reportingAuthorities.filter((item) => item.id !== user.id)} getLabel={(item) => `${item.full_name} · ${item.role_name}`} onChange={(value) => onChange('departmentHeadUserId', value)} />
         </Grid>
       )}
       {(has('currentAssignee') || has('clarificationReturn')) && (

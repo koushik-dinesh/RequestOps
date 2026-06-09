@@ -13,6 +13,7 @@ import api from '../api/client';
 import { formatEnum, missingReportingAuthorityText, priorities, requestTypes } from '../utils/constants';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
+import { useToast } from '../components/ToastProvider';
 
 const DRAFT_KEY = 'requestops.createRequestDraft';
 
@@ -25,7 +26,14 @@ const emptyForm = {
   expectedBenefits: '',
   roiType: '',
   roiHoursSavedPerEmployeePerMonth: '',
+  roiUsersImpacted: '',
+  roiTimeSavedPerTask: '',
+  roiTimeSavedUnit: 'MINUTES',
+  roiOccurrencesPerMonth: '',
   roiEmployeesBenefited: '',
+  roiEstimatedHourlyCostInr: '',
+  roiEstimatedRevenueImpactInr: '',
+  roiBusinessImpactCategory: '',
   roiMonthlyCostSavingsInr: '',
 };
 
@@ -48,6 +56,16 @@ const requestTips = [
   'Be specific about the business need',
   'Describe business impact',
   'Mention affected users',
+];
+
+const businessImpactCategories = [
+  { value: 'PRODUCTIVITY_IMPROVEMENT', label: 'Productivity Improvement' },
+  { value: 'COST_REDUCTION', label: 'Cost Reduction' },
+  { value: 'REVENUE_INCREASE', label: 'Revenue Increase' },
+  { value: 'PROCESS_AUTOMATION', label: 'Process Automation' },
+  { value: 'COMPLIANCE', label: 'Compliance' },
+  { value: 'QUALITY_IMPROVEMENT', label: 'Quality Improvement' },
+  { value: 'CUSTOMER_SATISFACTION', label: 'Customer Satisfaction' },
 ];
 
 function getInitialForm() {
@@ -89,32 +107,65 @@ function cleanRequestPayload(form) {
     businessJustification: form.businessJustification.trim(),
     description: form.description.trim(),
     expectedBenefits: form.expectedBenefits.trim() || null,
-    roiType: form.roiType || null,
-    roiHoursSavedPerEmployeePerMonth: form.roiType === 'TIME_SAVINGS' ? Number(form.roiHoursSavedPerEmployeePerMonth || 0) : null,
-    roiEmployeesBenefited: form.roiType === 'TIME_SAVINGS' ? Number(form.roiEmployeesBenefited || 0) : null,
-    roiMonthlyCostSavingsInr: form.roiType === 'COST_SAVINGS' ? Number(form.roiMonthlyCostSavingsInr || 0) : null,
+    roiType: null,
+    roiHoursSavedPerEmployeePerMonth: null,
+    roiUsersImpacted: form.roiUsersImpacted === '' ? null : Number(form.roiUsersImpacted),
+    roiTimeSavedPerTask: form.roiTimeSavedPerTask === '' ? null : Number(form.roiTimeSavedPerTask),
+    roiTimeSavedUnit: form.roiTimeSavedUnit || 'MINUTES',
+    roiOccurrencesPerMonth: form.roiOccurrencesPerMonth === '' ? null : Number(form.roiOccurrencesPerMonth),
+    roiEmployeesBenefited: form.roiEmployeesBenefited === '' ? null : Number(form.roiEmployeesBenefited),
+    roiEstimatedHourlyCostInr: form.roiEstimatedHourlyCostInr === '' ? null : Number(form.roiEstimatedHourlyCostInr),
+    roiEstimatedRevenueImpactInr: form.roiEstimatedRevenueImpactInr === '' ? null : Number(form.roiEstimatedRevenueImpactInr),
+    roiBusinessImpactCategory: form.roiBusinessImpactCategory || null,
+    roiMonthlyCostSavingsInr: null,
   };
 }
 
 function validateRequestPayload(payload) {
-  if (payload.title.length < 5) return 'Request title must be at least 5 characters.';
-  if (payload.businessJustification.length < 5) return 'Business justification must be at least 5 characters.';
-  if (payload.description.length < 10) return 'Detailed description must be at least 10 characters.';
-  if (payload.roiType === 'TIME_SAVINGS' && (!payload.roiHoursSavedPerEmployeePerMonth || !payload.roiEmployeesBenefited)) return 'Enter both time savings ROI values.';
-  if (payload.roiType === 'COST_SAVINGS' && !payload.roiMonthlyCostSavingsInr) return 'Enter monthly cost savings for ROI.';
-  return '';
+  const fieldErrors = {};
+  if (payload.title.length < 5) fieldErrors.title = 'Request title must be at least 5 characters.';
+  if (payload.businessJustification.length < 5) fieldErrors.businessJustification = 'Business justification must be at least 5 characters.';
+  if (payload.description.length < 10) fieldErrors.description = 'Detailed description must be at least 10 characters.';
+  const hasRoiInput = [
+    payload.roiUsersImpacted,
+    payload.roiTimeSavedPerTask,
+    payload.roiOccurrencesPerMonth,
+    payload.roiEmployeesBenefited,
+    payload.roiEstimatedHourlyCostInr,
+    payload.roiEstimatedRevenueImpactInr,
+    payload.roiBusinessImpactCategory,
+  ].some(Boolean);
+  if (hasRoiInput) {
+    if (!payload.roiBusinessImpactCategory) fieldErrors.roiBusinessImpactCategory = 'Select the business impact category.';
+    if (!payload.roiUsersImpacted) fieldErrors.roiUsersImpacted = 'Enter the number of users impacted.';
+    if (!payload.roiTimeSavedPerTask) fieldErrors.roiTimeSavedPerTask = 'Enter time saved per task.';
+    if (!payload.roiOccurrencesPerMonth) fieldErrors.roiOccurrencesPerMonth = 'Enter occurrences per month.';
+    if (!payload.roiEmployeesBenefited) fieldErrors.roiEmployeesBenefited = 'Enter employees benefited.';
+    if (!payload.roiEstimatedHourlyCostInr) fieldErrors.roiEstimatedHourlyCostInr = 'Enter estimated hourly cost.';
+  }
+  return fieldErrors;
 }
 
 function calculateAnnualRoi(form) {
-  if (form.roiType === 'TIME_SAVINGS') {
-    const monthly = Number(form.roiHoursSavedPerEmployeePerMonth || 0) * Number(form.roiEmployeesBenefited || 0);
-    return { monthly, annual: monthly * 12, label: `${monthly.toLocaleString('en-IN')} monthly hours / ${(monthly * 12).toLocaleString('en-IN')} annual hours` };
-  }
-  if (form.roiType === 'COST_SAVINGS') {
-    const annual = Number(form.roiMonthlyCostSavingsInr || 0) * 12;
-    return { annual, label: `₹${annual.toLocaleString('en-IN')} annual savings` };
-  }
-  return { annual: 0, label: 'Select ROI type to calculate value' };
+  const timeSaved = Number(form.roiTimeSavedPerTask || 0);
+  const timeSavedHours = form.roiTimeSavedUnit === 'HOURS' ? timeSaved : timeSaved / 60;
+  const occurrences = Number(form.roiOccurrencesPerMonth || 0);
+  const employees = Number(form.roiEmployeesBenefited || 0);
+  const hourlyCost = Number(form.roiEstimatedHourlyCostInr || 0);
+  const revenueImpact = Number(form.roiEstimatedRevenueImpactInr || 0);
+  const monthlyHours = timeSavedHours * occurrences * employees;
+  const annualHours = monthlyHours * 12;
+  const annualCostSavings = annualHours * hourlyCost;
+  const monthlyCapacity = employees * 160;
+  const automationPercentage = monthlyCapacity ? Math.min(100, (monthlyHours / monthlyCapacity) * 100) : 0;
+  const estimatedRoi = annualCostSavings + revenueImpact;
+  return {
+    monthlyHours,
+    annualHours,
+    annualCostSavings,
+    automationPercentage,
+    estimatedRoi,
+  };
 }
 
 function formatApiError(err) {
@@ -128,8 +179,11 @@ function formatApiError(err) {
 
 export default function RequestCreatePage() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
+  const formRef = useRef(null);
   const fileInputRef = useRef(null);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [message, setMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [files, setFiles] = useState([]);
@@ -144,7 +198,14 @@ export default function RequestCreatePage() {
 
   function update(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+    setFieldErrors((current) => ({ ...current, [field]: '' }));
     setMessage('');
+  }
+
+  function focusFirstInvalidField(errors) {
+    const firstField = Object.keys(errors).find((field) => errors[field]);
+    if (!firstField) return;
+    requestAnimationFrame(() => formRef.current?.querySelector(`[name="${firstField}"]`)?.focus());
   }
 
   function addFiles(fileList) {
@@ -169,9 +230,13 @@ export default function RequestCreatePage() {
     setError('');
     setMessage('');
     const payload = cleanRequestPayload(form);
-    const validationError = validateRequestPayload(payload);
-    if (validationError) {
-      setError(validationError);
+    const validationErrors = validateRequestPayload(payload);
+    if (Object.keys(validationErrors).length) {
+      const summary = Object.values(validationErrors).filter(Boolean).join(' ');
+      setFieldErrors(validationErrors);
+      setError(summary);
+      showToast(summary, { severity: 'error', autoHideDuration: 5200 });
+      focusFirstInvalidField(validationErrors);
       return;
     }
     setSubmitting(true);
@@ -179,6 +244,7 @@ export default function RequestCreatePage() {
 
     try {
       createdRequest = await api.post('/requests', payload);
+      showToast('Request submitted successfully and routed for approval.');
 
       await Promise.all(files.map((file) => {
         const data = new FormData();
@@ -230,6 +296,7 @@ export default function RequestCreatePage() {
           <Grid size={{ xs: 12, lg: 8.7 }}>
             <Box
               component="form"
+              ref={formRef}
               onSubmit={handleSubmit}
               sx={{
                 borderRadius: 2.5,
@@ -284,12 +351,14 @@ export default function RequestCreatePage() {
 
                 <TextField
                   label="Request Title"
+                  name="title"
                   value={form.title}
                   onChange={(e) => update('title', e.target.value)}
                   required
                   fullWidth
                   placeholder="Example: Automate vendor onboarding approval workflow"
-                  helperText="Use a concise title that describes the requested outcome."
+                  error={Boolean(fieldErrors.title)}
+                  helperText={fieldErrors.title || 'Use a concise title that describes the requested outcome.'}
                 />
 
                 <Grid container spacing={1.5}>
@@ -323,21 +392,27 @@ export default function RequestCreatePage() {
 
                 <TextField
                   label="Business Justification"
+                  name="businessJustification"
                   value={form.businessJustification}
                   onChange={(e) => update('businessJustification', e.target.value)}
                   multiline
                   minRows={3}
                   required
+                  error={Boolean(fieldErrors.businessJustification)}
+                  helperText={fieldErrors.businessJustification}
                   placeholder="Explain the business problem, risk, or opportunity."
                 />
 
                 <TextField
                   label="Detailed Description"
+                  name="description"
                   value={form.description}
                   onChange={(e) => update('description', e.target.value)}
                   multiline
                   minRows={4}
                   required
+                  error={Boolean(fieldErrors.description)}
+                  helperText={fieldErrors.description}
                   placeholder="Include process details, impacted teams, current workflow, and expected behavior."
                 />
 
@@ -360,35 +435,62 @@ export default function RequestCreatePage() {
                 >
                   <Typography variant="subtitle2" fontWeight={820}>ROI Information</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Estimate measurable business value for approval review.
+                    Estimate measurable business value using simple inputs. Calculated values update automatically for approval review.
                   </Typography>
                   <Grid container spacing={1.5} sx={{ mt: 1 }}>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <TextField select label="ROI Type" value={form.roiType} onChange={(e) => update('roiType', e.target.value)} fullWidth>
-                        <MenuItem value="">Not specified</MenuItem>
-                        <MenuItem value="TIME_SAVINGS">Time Savings</MenuItem>
-                        <MenuItem value="COST_SAVINGS">Cost Savings</MenuItem>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField select name="roiBusinessImpactCategory" label="Business Impact Category" value={form.roiBusinessImpactCategory} onChange={(e) => update('roiBusinessImpactCategory', e.target.value)} fullWidth error={Boolean(fieldErrors.roiBusinessImpactCategory)} helperText={fieldErrors.roiBusinessImpactCategory || 'Choose the primary business outcome this request supports.'}>
+                        <MenuItem value="">Select category</MenuItem>
+                        {businessImpactCategories.map((option) => (
+                          <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                        ))}
                       </TextField>
                     </Grid>
-                    {form.roiType === 'TIME_SAVINGS' && (
-                      <>
-                        <Grid size={{ xs: 12, md: 4 }}>
-                          <TextField label="Hours Saved Per Employee Per Month" type="number" value={form.roiHoursSavedPerEmployeePerMonth} onChange={(e) => update('roiHoursSavedPerEmployeePerMonth', e.target.value)} fullWidth />
-                        </Grid>
-                        <Grid size={{ xs: 12, md: 4 }}>
-                          <TextField label="Employees Benefited" type="number" value={form.roiEmployeesBenefited} onChange={(e) => update('roiEmployeesBenefited', e.target.value)} fullWidth />
-                        </Grid>
-                      </>
-                    )}
-                    {form.roiType === 'COST_SAVINGS' && (
-                      <Grid size={{ xs: 12, md: 4 }}>
-                        <TextField label="Monthly Cost Savings (INR)" type="number" value={form.roiMonthlyCostSavingsInr} onChange={(e) => update('roiMonthlyCostSavingsInr', e.target.value)} fullWidth />
-                      </Grid>
-                    )}
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField name="roiUsersImpacted" label="Number of Users Impacted" type="number" value={form.roiUsersImpacted} onChange={(e) => update('roiUsersImpacted', e.target.value)} fullWidth error={Boolean(fieldErrors.roiUsersImpacted)} helperText={fieldErrors.roiUsersImpacted || 'Total business users or customers affected by this improvement.'} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <TextField name="roiTimeSavedPerTask" label="Time Saved per Task" type="number" value={form.roiTimeSavedPerTask} onChange={(e) => update('roiTimeSavedPerTask', e.target.value)} fullWidth error={Boolean(fieldErrors.roiTimeSavedPerTask)} helperText={fieldErrors.roiTimeSavedPerTask || 'Estimated time saved each time the process is completed.'} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 2 }}>
+                      <TextField select label="Unit" value={form.roiTimeSavedUnit} onChange={(e) => update('roiTimeSavedUnit', e.target.value)} fullWidth helperText="Minutes or hours">
+                        <MenuItem value="MINUTES">Minutes</MenuItem>
+                        <MenuItem value="HOURS">Hours</MenuItem>
+                      </TextField>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 3 }}>
+                      <TextField name="roiOccurrencesPerMonth" label="Occurrences per Month" type="number" value={form.roiOccurrencesPerMonth} onChange={(e) => update('roiOccurrencesPerMonth', e.target.value)} fullWidth error={Boolean(fieldErrors.roiOccurrencesPerMonth)} helperText={fieldErrors.roiOccurrencesPerMonth || 'How often this task/process happens each month.'} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 3 }}>
+                      <TextField name="roiEmployeesBenefited" label="Employees Benefited" type="number" value={form.roiEmployeesBenefited} onChange={(e) => update('roiEmployeesBenefited', e.target.value)} fullWidth error={Boolean(fieldErrors.roiEmployeesBenefited)} helperText={fieldErrors.roiEmployeesBenefited || 'Employees whose work time is reduced by this request.'} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField name="roiEstimatedHourlyCostInr" label="Estimated Hourly Cost (₹)" type="number" value={form.roiEstimatedHourlyCostInr} onChange={(e) => update('roiEstimatedHourlyCostInr', e.target.value)} fullWidth error={Boolean(fieldErrors.roiEstimatedHourlyCostInr)} helperText={fieldErrors.roiEstimatedHourlyCostInr || 'Average hourly employee cost used to calculate annual savings.'} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <TextField name="roiEstimatedRevenueImpactInr" label="Estimated Revenue Impact (₹) (Optional)" type="number" value={form.roiEstimatedRevenueImpactInr} onChange={(e) => update('roiEstimatedRevenueImpactInr', e.target.value)} fullWidth helperText="Optional expected annual revenue uplift or protected revenue." />
+                    </Grid>
                     <Grid size={{ xs: 12 }}>
-                      <Alert severity="info" sx={{ py: 0.5 }}>
-                        {roi.label}
-                      </Alert>
+                      <Box sx={{ mt: 0.5, p: 1.5, borderRadius: 1.5, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: 'background.paper' }}>
+                        <Typography variant="subtitle2" fontWeight={820} sx={{ mb: 1 }}>Calculated Business Impact</Typography>
+                        <Grid container spacing={1.25}>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField label="Hours Saved per Month" value={roi.monthlyHours.toLocaleString('en-IN', { maximumFractionDigits: 2 })} fullWidth InputProps={{ readOnly: true }} helperText="Time saved per task x occurrences per month x employees benefited." />
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 6 }}>
+                            <TextField label="Hours Saved per Year" value={roi.annualHours.toLocaleString('en-IN', { maximumFractionDigits: 2 })} fullWidth InputProps={{ readOnly: true }} helperText="Hours saved per month x 12." />
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 4 }}>
+                            <TextField label="Annual Cost Savings" value={`₹${roi.annualCostSavings.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} fullWidth InputProps={{ readOnly: true }} helperText="Hours saved per year x estimated hourly cost." />
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 4 }}>
+                            <TextField label="Automation Percentage" value={`${roi.automationPercentage.toLocaleString('en-IN', { maximumFractionDigits: 2 })}%`} fullWidth InputProps={{ readOnly: true }} helperText="Monthly hours saved as a share of benefited employees' monthly work capacity." />
+                          </Grid>
+                          <Grid size={{ xs: 12, md: 4 }}>
+                            <TextField label="Estimated ROI" value={`₹${roi.estimatedRoi.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`} fullWidth InputProps={{ readOnly: true }} helperText="Annual cost savings + optional revenue impact." />
+                          </Grid>
+                        </Grid>
+                      </Box>
                     </Grid>
                   </Grid>
                 </Box>
@@ -400,9 +502,9 @@ export default function RequestCreatePage() {
                     sx={{ justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, mb: 1 }}
                   >
                     <Box>
-                      <Typography variant="subtitle2" fontWeight={820}>Attachments</Typography>
+                      <Typography variant="subtitle2" fontWeight={820}>Attachments Optional</Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Upload screenshots, specs, documents, or evidence with this request.
+                        Add screenshots, specs, or evidence only if available. You can submit without attachments.
                       </Typography>
                     </Box>
                     {files.length > 0 && (
@@ -455,9 +557,9 @@ export default function RequestCreatePage() {
                           <CloudUploadOutlinedIcon />
                         </Box>
                         <Box>
-                          <Typography fontWeight={820}>Drag and drop files here</Typography>
+                          <Typography fontWeight={820}>Drag and drop optional files here</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            Multiple files supported. Attachments upload when you submit.
+                            Multiple files supported. Files upload when you submit, but they are not required.
                           </Typography>
                         </Box>
                       </Stack>

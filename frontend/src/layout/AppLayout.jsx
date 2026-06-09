@@ -45,8 +45,6 @@ import {
   Plus,
   Settings,
   ShieldCheck,
-  TestTube2,
-  UserCheck,
   UsersRound,
 } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -73,20 +71,15 @@ const navGroups = [
   {
     label: 'Operations',
     items: [
-      { label: 'Work In Progress', path: '/development', icon: Code2, route: '/development' },
       { label: 'Developer Workload', path: '/developer-workload', icon: Gauge, route: '/developer-workload' },
-      { label: 'Review & Validation', path: '/testing', icon: TestTube2, route: '/testing' },
-      { label: 'Final Approval', path: '/uat', icon: UserCheck, route: '/uat' },
     ],
   },
   {
     label: 'Project Management',
     items: [
-      { label: 'PM Dashboard', path: '/project-manager', icon: Gauge, route: '/project-manager' },
       { label: 'Scope Management', path: '/project-scopes', icon: ClipboardList, route: '/project-scopes' },
       { label: 'User Stories', path: '/user-stories', icon: BookOpen, route: '/user-stories' },
       { label: 'Sprint Management', path: '/sprints', icon: Code2, route: '/sprints' },
-      { label: 'Sprint Task Board', path: '/sprint-board', icon: ClipboardList, route: '/sprint-board' },
     ],
   },
   {
@@ -102,12 +95,7 @@ const navGroups = [
 function getRoleAwareNavLabel(item, roleCode) {
   if (item.path === '/requests' && roleCode === 'EMPLOYEE') return 'My Requests';
   if (item.path === '/requests' && ['DEVELOPER', 'QA', 'UAT_APPROVER'].includes(roleCode)) return 'Assigned Requests';
-  if (item.path === '/development' && roleCode === 'DEVELOPER') return 'My Work Queue';
-  if (item.path === '/development' && roleCode === 'IT_HEAD') return 'Work Oversight';
   if (item.path === '/developer-workload') return 'Developer Workload';
-  if (item.path === '/testing' && roleCode === 'QA') return 'Pending Review';
-  if (item.path === '/testing' && roleCode === 'IT_HEAD') return 'Review Oversight';
-  if (item.path === '/uat') return 'Final Approval Queue';
   if (item.path === '/admin') return 'Admin Console';
   return item.label;
 }
@@ -401,30 +389,6 @@ export default function AppLayout() {
                 </Box>
               )}
             </Stack>
-            {showReportingOwner && !effectiveCollapsed && (
-              <Box
-                sx={{
-                  mt: 0.6,
-                  px: 0.85,
-                  py: 0.75,
-                  borderRadius: 1.5,
-                  border: `1px solid ${sidebarBorder}`,
-                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(15,23,42,0.54)' : '#FFFFFF',
-                }}
-              >
-                <Typography sx={{ color: sidebarMuted, fontSize: 10.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Reports to
-                </Typography>
-                <Typography sx={{ color: theme.palette.text.primary, fontSize: 12, fontWeight: 760, lineHeight: 1.25 }} noWrap>
-                  {reportingOwner}
-                </Typography>
-                {user?.departmentHeadEmail && user?.departmentHeadId !== user?.id && (
-                  <Typography sx={{ color: sidebarMuted, fontSize: 10.5, lineHeight: 1.25 }} noWrap>
-                    {user.departmentHeadEmail}
-                  </Typography>
-                )}
-              </Box>
-            )}
           </Box>
         </Box>
       </Drawer>

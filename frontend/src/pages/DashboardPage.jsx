@@ -64,7 +64,7 @@ export default function DashboardPage() {
   const counts = {
     total: requests.length,
     pending: requests.filter((item) => ['DEPARTMENT_APPROVAL_PENDING', 'IT_REVIEW_PENDING', 'ASSIGNMENT_PENDING', 'CLARIFICATION_REQUESTED'].includes(item.status)).length,
-    development: requests.filter((item) => ['ASSIGNED', 'IN_DEVELOPMENT'].includes(item.status)).length,
+    development: requests.filter((item) => ['ASSIGNED', 'SPRINT_ACTIVE', 'IN_DEVELOPMENT'].includes(item.status)).length,
     testing: requests.filter((item) => item.status === 'IN_TESTING').length,
     closed: requests.filter((item) => item.status === 'CLOSED').length,
     pendingUat: requests.filter((item) => item.status === 'UAT_PENDING').length,
@@ -76,15 +76,20 @@ export default function DashboardPage() {
   const byDepartment = departments.map((department) => ({
     name: department.name,
     head: department.department_head_name || missingReportingAuthorityText,
+    hasHead: Boolean(department.department_head_name),
     count: requests.filter((request) => request.department_name === department.name).length,
     pending: requests.filter((request) => request.department_name === department.name && !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED'].includes(request.status)).length,
     completed: requests.filter((request) => request.department_name === department.name && request.status === 'CLOSED').length,
+  })).map((department) => ({
+    ...department,
+    completionRate: department.count ? Math.round((department.completed / department.count) * 100) : 0,
+    attentionLevel: !department.hasHead ? 'Setup Required' : department.pending > 5 ? 'High Load' : department.pending > 0 ? 'Active' : 'Stable',
   })).sort((a, b) => b.count - a.count);
 
   const isEmployeeDashboard = user?.roleCode === 'EMPLOYEE';
   const kpiCards = buildRoleKpiCards(dashboard.cards);
   const developmentRequests = requests
-    .filter((request) => ['ASSIGNED', 'IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'].includes(request.status) || Number(request.progress_percentage || 0) > 0)
+    .filter((request) => ['ASSIGNED', 'SPRINT_ACTIVE', 'IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'].includes(request.status) || Number(request.progress_percentage || 0) > 0)
     .sort((a, b) => Number(b.progress_percentage || 0) - Number(a.progress_percentage || 0));
 
   const requestActivity = dashboard.recentActivity.map((activity) => ({
@@ -140,7 +145,7 @@ export default function DashboardPage() {
         ) : (
           <Grid container spacing={2}>
             <Grid size={{ xs: 12, xl: 8 }}>
-              <Panel title="Department Overview">
+              <Panel title="Department Overview" subtitle="Department request load, ownership, and completion health">
                 <DepartmentOverview rows={byDepartment} />
               </Panel>
             </Grid>
@@ -224,7 +229,7 @@ function ActivityFeed({ rows }) {
           <Avatar sx={{ width: 32, height: 32, bgcolor: '#DBEAFE', color: '#1D4ED8', fontSize: 12, fontWeight: 850 }}>
             {row.actor?.[0] || 'R'}
           </Avatar>
-          <Box flex={1} minWidth={0}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <Typography fontWeight={800} sx={{ fontSize: 13.5 }}>{row.actor}</Typography>
               <Typography variant="body2" color="text.secondary">{row.action}</Typography>
@@ -241,50 +246,127 @@ function ActivityFeed({ rows }) {
 }
 
 function DepartmentOverview({ rows }) {
+  const totals = rows.reduce((acc, row) => ({
+    requests: acc.requests + row.count,
+    pending: acc.pending + row.pending,
+    completed: acc.completed + row.completed,
+    withoutHead: acc.withoutHead + (row.hasHead ? 0 : 1),
+  }), { requests: 0, pending: 0, completed: 0, withoutHead: 0 });
+  const topDepartments = rows.slice(0, 6);
+
   return (
-    <Stack spacing={0}>
-      <Box sx={{ display: { xs: 'none', md: 'grid' }, gridTemplateColumns: '1.4fr .7fr .7fr .7fr 1.2fr', gap: 2, px: 1.5, pb: 1.25 }}>
-        {['Department', 'Requests', 'Pending', 'Completed', 'Department Head'].map((label) => (
-          <Typography key={label} variant="caption" color="text.secondary" fontWeight={850} sx={{ textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</Typography>
-        ))}
-      </Box>
-      {rows.length === 0 ? <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 2 }}>No department request activity yet.</Typography> : rows.map((row) => (
-        <Box
-          key={row.name}
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: { xs: '1fr', md: '1.4fr .7fr .7fr .7fr 1.2fr' },
-            gap: { xs: 0.75, md: 2 },
-            alignItems: 'center',
-            px: 1.5,
-            py: 1.25,
-            borderTop: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
-          }}
-        >
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Avatar sx={{ width: 30, height: 30, bgcolor: '#E0F2FE', color: '#0369A1', fontSize: 12, fontWeight: 850 }}>{row.name[0]}</Avatar>
-            <Typography fontWeight={800}>{row.name}</Typography>
-          </Stack>
-          <DepartmentValue label="Requests" value={row.count} />
-          <DepartmentValue label="Pending" value={row.pending} color={row.pending ? 'warning.main' : 'text.secondary'} />
-          <DepartmentValue label="Completed" value={row.completed} color="success.main" />
-          <DepartmentValue label="Department Head" value={row.head} muted />
-        </Box>
-      ))}
+    <Stack spacing={2}>
+      <Grid container spacing={1.25}>
+        <DepartmentSummaryCard label="Total Requests" value={totals.requests} helper="Across all departments" tone="info" />
+        <DepartmentSummaryCard label="Pending Work" value={totals.pending} helper="Open workflow items" tone={totals.pending ? 'warning' : 'success'} />
+        <DepartmentSummaryCard label="Completed" value={totals.completed} helper="Closed requests" tone="success" />
+        <DepartmentSummaryCard label="Missing Heads" value={totals.withoutHead} helper="Departments needing setup" tone={totals.withoutHead ? 'error' : 'success'} />
+      </Grid>
+
+      {rows.length === 0 ? (
+        <Typography variant="body2" color="text.secondary" sx={{ px: 1.5, py: 2 }}>No department request activity yet.</Typography>
+      ) : (
+        <Grid container spacing={1.5}>
+          {topDepartments.map((row) => (
+            <Grid key={row.name} size={{ xs: 12, md: 6, xl: 4 }}>
+              <DepartmentHealthCard row={row} />
+            </Grid>
+          ))}
+        </Grid>
+      )}
+
+      {rows.length > topDepartments.length && (
+        <Typography variant="caption" color="text.secondary">
+          Showing top {topDepartments.length} departments by request volume out of {rows.length}.
+        </Typography>
+      )}
     </Stack>
   );
 }
 
-function DepartmentValue({ label, value, color = 'text.primary', muted = false }) {
+function DepartmentSummaryCard({ label, value, helper, tone }) {
+  const color = toneColor(tone);
   return (
-    <Box sx={{ minWidth: 0 }}>
-      <Typography variant="caption" color="text.secondary" fontWeight={800} sx={{ display: { md: 'none' }, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-        {label}
-      </Typography>
-      <Typography color={muted ? 'text.secondary' : color} sx={{ overflowWrap: 'anywhere' }}>
-        {value}
-      </Typography>
+    <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
+      <Box sx={{ p: 1.5, borderRadius: 2, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={850} sx={{ textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          {label}
+        </Typography>
+        <Typography variant="h5" fontWeight={900} sx={{ color, mt: 0.4 }}>{value}</Typography>
+        <Typography variant="caption" color="text.secondary">{helper}</Typography>
+      </Box>
+    </Grid>
+  );
+}
+
+function DepartmentHealthCard({ row }) {
+  const attentionTone = row.attentionLevel === 'Setup Required'
+    ? 'error'
+    : row.attentionLevel === 'High Load'
+      ? 'warning'
+      : row.attentionLevel === 'Active'
+        ? 'info'
+        : 'success';
+  const attentionColor = toneColor(attentionTone);
+  const progressColor = row.completionRate >= 75 ? 'success' : row.completionRate >= 35 ? 'primary' : 'warning';
+
+  return (
+    <Box
+      sx={{
+        height: '100%',
+        p: 1.6,
+        borderRadius: 2.25,
+        border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
+        bgcolor: (theme) => theme.custom.semantic.elevated,
+      }}
+    >
+      <Stack spacing={1.4}>
+        <Stack direction="row" spacing={1.1} sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+            <Avatar sx={{ width: 36, height: 36, bgcolor: '#E0F2FE', color: '#0369A1', fontSize: 13, fontWeight: 900 }}>{row.name[0]}</Avatar>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography fontWeight={900} noWrap>{row.name}</Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>{row.head}</Typography>
+            </Box>
+          </Stack>
+          <Chip
+            size="small"
+            label={row.attentionLevel}
+            sx={{ flexShrink: 0, color: attentionColor, bgcolor: `${attentionColor}14`, fontWeight: 850, borderRadius: 1 }}
+          />
+        </Stack>
+
+        <Grid container spacing={1}>
+          <DepartmentMetric label="Requests" value={row.count} />
+          <DepartmentMetric label="Pending" value={row.pending} tone={row.pending ? 'warning' : 'success'} />
+          <DepartmentMetric label="Done" value={row.completed} tone="success" />
+        </Grid>
+
+        <Box>
+          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 0.6 }}>
+            <Typography variant="caption" color="text.secondary" fontWeight={850}>Completion</Typography>
+            <Typography variant="caption" fontWeight={900}>{row.completionRate}%</Typography>
+          </Stack>
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(row.completionRate, 100)}
+            color={progressColor}
+            sx={{ height: 7, borderRadius: 999, bgcolor: (theme) => theme.custom.semantic.paperSoft }}
+          />
+        </Box>
+      </Stack>
     </Box>
+  );
+}
+
+function DepartmentMetric({ label, value, tone = 'info' }) {
+  return (
+    <Grid size={{ xs: 4 }}>
+      <Box sx={{ p: 1, borderRadius: 1.5, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={800}>{label}</Typography>
+        <Typography fontWeight={900} sx={{ color: toneColor(tone) }}>{value}</Typography>
+      </Box>
+    </Grid>
   );
 }
 
@@ -502,6 +584,12 @@ function buildRoleKpiCards(cards = []) {
     'Requests In Progress': { tone: 'success', icon: <Code2 size={17} />, change: 'Active work' },
     'Work In Progress': { tone: 'success', icon: <Code2 size={17} />, change: 'In progress' },
     'Ready To Start': { tone: 'warning', icon: <Code2 size={17} />, change: 'Ready to start' },
+    'Sprint Planning': { tone: 'warning', icon: <GitPullRequest size={17} />, change: 'Task breakdown' },
+    'Sprint Progress': { tone: 'info', icon: <Code2 size={17} />, change: 'Average task progress' },
+    'My Sprint Tasks': { tone: 'info', icon: <Code2 size={17} />, change: 'Assigned tasks' },
+    'Tasks In Progress': { tone: 'success', icon: <Code2 size={17} />, change: 'Active tasks' },
+    'Tasks Blocked': { tone: 'danger', icon: <ClipboardCheck size={17} />, change: 'Needs PM help' },
+    'Developer Workload': { tone: 'purple', icon: <Users size={17} />, change: 'Open assigned tasks' },
     Overdue: { tone: 'danger', icon: <ClipboardCheck size={17} />, change: 'Needs attention' },
     Completed: { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Completed work' },
     'Review & Validation': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Review queue' },

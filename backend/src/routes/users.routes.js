@@ -13,13 +13,25 @@ const activeRequestStatuses = [
   'CLARIFICATION_REQUESTED',
   'IT_REVIEW_PENDING',
   'ASSIGNMENT_PENDING',
+  'PM_ASSIGNED',
+  'SCOPE_REVIEW',
+  'USER_STORY_REVIEW',
+  'DEVELOPER_ASSIGNED',
+  'SPRINT_PLANNING',
   'ASSIGNED',
   'IN_DEVELOPMENT',
   'DEVELOPMENT_COMPLETE',
+  'QA_PENDING',
+  'QA_FAILED',
+  'QA_PASSED',
   'IN_TESTING',
   'TEST_FAILED',
   'UAT_PENDING',
   'UAT_REJECTED',
+  'UAT_FAILED',
+  'UAT_APPROVED',
+  'DEPLOYMENT_PENDING',
+  'DEPLOYED',
 ];
 
 const lifecycleRoleCodes = ['SYSTEM_ADMIN', 'DEPARTMENT_HEAD', 'EMPLOYEE'];
@@ -119,7 +131,7 @@ async function buildResponsibilitySummary(userId) {
 
   const items = [
     { key: 'departmentHead', label: 'Department Head', count: departmentRows.length, records: departmentRows },
-    { key: 'reportedTo', label: 'Reported To', count: reportedRows.length, records: reportedRows },
+    { key: 'reportedTo', label: 'Department Approval Owner', count: reportedRows.length, records: reportedRows },
     { key: 'currentAssignee', label: 'Workflow Responsibility', count: currentAssigneeRows.length, records: currentAssigneeRows },
     { key: 'itHead', label: 'Internal Review Owner', count: itRows.length, records: itRows },
     { key: 'developer', label: 'Assigned Employee', count: developerRows.length, records: developerRows },
@@ -281,7 +293,7 @@ router.post('/:id/reassign-responsibilities', authorize('SYSTEM_ADMIN'), asyncHa
   const summary = await buildResponsibilitySummary(req.params.id);
 
   requireReplacement(summary, 'departmentHead', body.departmentHeadUserId, 'New department head');
-  requireReplacement(summary, 'reportedTo', body.departmentHeadUserId, 'New reported-to authority');
+  requireReplacement(summary, 'reportedTo', body.departmentHeadUserId, 'New department approval owner');
   requireReplacement(summary, 'currentAssignee', body.currentAssigneeUserId, 'New workflow owner');
   requireReplacement(summary, 'itHead', body.itHeadUserId, 'New internal review owner');
   requireReplacement(summary, 'developer', body.developerUserId, 'New assigned employee');
@@ -319,7 +331,7 @@ router.post('/:id/reassign-responsibilities', authorize('SYSTEM_ADMIN'), asyncHa
     });
     await executeTransfer({
       key: 'reportedTo',
-      label: 'Reported To',
+      label: 'Department Approval Owner',
       sql: `UPDATE requests SET department_head_user_id = ? WHERE department_head_user_id = ? AND status IN (${activeStatusSql()})`,
       params: [body.departmentHeadUserId, req.params.id],
       replacementUserId: body.departmentHeadUserId,
@@ -436,7 +448,7 @@ router.post('/:id/change-department', authorize('SYSTEM_ADMIN'), asyncHandler(as
   if (!existing) throw new ApiError(404, 'User not found.');
   const departmentRows = await query('SELECT id, name FROM departments WHERE id = :id AND status = "ACTIVE"', { id: body.departmentId });
   if (!departmentRows[0]) throw new ApiError(400, 'Choose an active department.');
-  await assertActiveUser(body.reportingManagerUserId, 'Reported To employee', {
+  await assertActiveUser(body.reportingManagerUserId, 'Reporting Manager', {
     allowSelfId: req.params.id,
     requiredRoleCodes: ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
   });
@@ -479,7 +491,7 @@ router.post('/:id/change-reporting-manager', authorize('SYSTEM_ADMIN'), asyncHan
   const body = z.object({ reportingManagerUserId: z.coerce.number().int().positive() }).parse(req.body);
   const existing = await getUserWithRole(req.params.id);
   if (!existing) throw new ApiError(404, 'User not found.');
-  await assertActiveUser(body.reportingManagerUserId, 'Reported To employee', {
+  await assertActiveUser(body.reportingManagerUserId, 'Reporting Manager', {
     allowSelfId: req.params.id,
     requiredRoleCodes: ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
   });
@@ -512,7 +524,7 @@ router.post('/:id/reactivate', authorize('SYSTEM_ADMIN'), asyncHandler(async (re
   if (!departmentRows[0]) throw new ApiError(400, 'Choose an active department.');
   const role = await getRoleById(body.roleId);
   if (!role) throw new ApiError(400, 'Choose an active role.');
-  await assertActiveUser(body.reportingManagerUserId, 'Reported To employee', {
+  await assertActiveUser(body.reportingManagerUserId, 'Reporting Manager', {
     allowSelfId: req.params.id,
     requiredRoleCodes: ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'],
   });

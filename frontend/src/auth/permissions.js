@@ -18,7 +18,6 @@ export const routePermissions = {
   '/project-scopes': [roles.ADMIN, roles.IT_HEAD, roles.PROJECT_MANAGER],
   '/user-stories': [roles.ADMIN, roles.PROJECT_MANAGER, roles.DEPARTMENT_HEAD],
   '/sprints': [roles.ADMIN, roles.PROJECT_MANAGER],
-  '/sprint-board': [roles.ADMIN, roles.PROJECT_MANAGER, roles.DEVELOPER],
   '/development': [roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEVELOPER, roles.ADMIN],
   '/developer-workload': [roles.ADMIN, roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEVELOPER, roles.QA],
   '/testing': [roles.IT_HEAD, roles.PROJECT_MANAGER, roles.QA, roles.ADMIN],

@@ -27,6 +27,8 @@ ACTIVE_REQUEST_STATUSES = [
     "USER_STORY_REVIEW",
     "DEVELOPER_ASSIGNED",
     "SPRINT_PLANNING",
+    "SPRINT_CREATED",
+    "SPRINT_ACTIVE",
     "ASSIGNED",
     "IN_DEVELOPMENT",
     "DEVELOPMENT_COMPLETE",
@@ -41,6 +43,7 @@ ACTIVE_REQUEST_STATUSES = [
     "UAT_REJECTED",
     "DEPLOYMENT_PENDING",
     "DEPLOYED",
+    "READY_FOR_COMPLETION",
 ]
 LIFECYCLE_ROLE_CODES = ["SYSTEM_ADMIN", "DEPARTMENT_HEAD", "PROJECT_MANAGER", "EMPLOYEE"]
 
@@ -105,9 +108,13 @@ def build_responsibility_summary(db: Session, user_id: int) -> dict:
     it_rows = rows(db, f"SELECT id, request_number, title, status FROM requests WHERE it_head_user_id = :userId AND status IN ({active_status_sql()})", params)
     pm_rows = rows(db, f"SELECT id, request_number, title, status FROM requests WHERE project_manager_user_id = :userId AND status IN ({active_status_sql()})", params)
     developer_rows = rows(db, f"""
-        SELECT r.id, r.request_number, r.title, r.status
-        FROM assignments a JOIN requests r ON r.id = a.request_id
-        WHERE a.developer_user_id = :userId AND a.is_active = TRUE AND r.status IN ({active_status_sql()})
+        SELECT DISTINCT r.id, r.request_number, r.title, r.status
+        FROM sprint_tasks task
+        JOIN sprints sprint ON sprint.id = task.sprint_id
+        JOIN requests r ON r.id = sprint.request_id
+        WHERE task.assigned_developer_user_id = :userId
+          AND task.status IN ('TODO', 'IN_PROGRESS', 'BLOCKED')
+          AND r.status IN ({active_status_sql()})
     """, params)
     qa_rows = rows(db, f"""
         SELECT r.id, r.request_number, r.title, r.status
@@ -118,11 +125,11 @@ def build_responsibility_summary(db: Session, user_id: int) -> dict:
     manager_rows = rows(db, "SELECT id, full_name, email FROM users WHERE reporting_manager_user_id = :userId AND status = 'ACTIVE'", params)
     items = [
         {"key": "departmentHead", "label": "Department Head", "count": len(department_rows), "records": department_rows},
-        {"key": "reportedTo", "label": "Reported To", "count": len(reported_rows), "records": reported_rows},
+        {"key": "reportedTo", "label": "Department Approval Owner", "count": len(reported_rows), "records": reported_rows},
         {"key": "currentAssignee", "label": "Workflow Responsibility", "count": len(current_assignee_rows), "records": current_assignee_rows},
         {"key": "itHead", "label": "Internal Review Owner", "count": len(it_rows), "records": it_rows},
         {"key": "projectManager", "label": "Project Manager", "count": len(pm_rows), "records": pm_rows},
-        {"key": "developer", "label": "Assigned Employee", "count": len(developer_rows), "records": developer_rows},
+        {"key": "developer", "label": "Sprint Task Owner", "count": len(developer_rows), "records": developer_rows},
         {"key": "qa", "label": "QA Owner", "count": len(qa_rows), "records": qa_rows},
         {"key": "clarificationReturn", "label": "Clarification Return Owner", "count": len(clarification_rows), "records": clarification_rows},
         {"key": "reportingManager", "label": "Reporting Manager", "count": len(manager_rows), "records": manager_rows},
@@ -247,7 +254,7 @@ def reassign_responsibilities(user_id: int, payload: ReassignResponsibilitiesPay
     body = payload.model_dump()
     summary = build_responsibility_summary(db, user_id)
     require_replacement(summary, "departmentHead", body.get("departmentHeadUserId"), "New department head")
-    require_replacement(summary, "reportedTo", body.get("departmentHeadUserId"), "New reported-to authority")
+    require_replacement(summary, "reportedTo", body.get("departmentHeadUserId"), "New department approval owner")
     require_replacement(summary, "currentAssignee", body.get("currentAssigneeUserId"), "New workflow owner")
     require_replacement(summary, "itHead", body.get("itHeadUserId"), "New internal review owner")
     require_replacement(summary, "projectManager", body.get("projectManagerUserId"), "New project manager")
@@ -265,11 +272,11 @@ def reassign_responsibilities(user_id: int, payload: ReassignResponsibilitiesPay
 
     transfers = [
         ("departmentHead", "Department Head", 'UPDATE departments SET department_head_user_id = :newId WHERE department_head_user_id = :oldId AND status = "ACTIVE"', body.get("departmentHeadUserId")),
-        ("reportedTo", "Reported To", f"UPDATE requests SET department_head_user_id = :newId WHERE department_head_user_id = :oldId AND status IN ({active_status_sql()})", body.get("departmentHeadUserId")),
+        ("reportedTo", "Department Approval Owner", f"UPDATE requests SET department_head_user_id = :newId WHERE department_head_user_id = :oldId AND status IN ({active_status_sql()})", body.get("departmentHeadUserId")),
         ("currentAssignee", "Workflow Responsibility", f"UPDATE requests SET current_assignee_user_id = :newId WHERE current_assignee_user_id = :oldId AND status IN ({active_status_sql()})", body.get("currentAssigneeUserId")),
         ("itHead", "Internal Review Owner", f"UPDATE requests SET it_head_user_id = :newId WHERE it_head_user_id = :oldId AND status IN ({active_status_sql()})", body.get("itHeadUserId")),
         ("projectManager", "Project Manager", f"UPDATE requests SET project_manager_user_id = :newId WHERE project_manager_user_id = :oldId AND status IN ({active_status_sql()})", body.get("projectManagerUserId")),
-        ("developer", "Assigned Employee", f"UPDATE assignments a JOIN requests r ON r.id = a.request_id SET a.developer_user_id = :newId WHERE a.developer_user_id = :oldId AND a.is_active = TRUE AND r.status IN ({active_status_sql()})", body.get("developerUserId")),
+        ("developer", "Assigned Sprint Tasks", f"UPDATE sprint_tasks task JOIN sprints sprint ON sprint.id = task.sprint_id JOIN requests r ON r.id = sprint.request_id SET task.assigned_developer_user_id = :newId WHERE task.assigned_developer_user_id = :oldId AND task.status IN ('TODO', 'IN_PROGRESS', 'BLOCKED') AND r.status IN ({active_status_sql()})", body.get("developerUserId")),
         ("qa", "QA Owner", f"UPDATE assignments a JOIN requests r ON r.id = a.request_id SET a.qa_user_id = :newId WHERE a.qa_user_id = :oldId AND a.is_active = TRUE AND r.status IN ({active_status_sql()})", body.get("qaUserId")),
         ("clarificationReturn", "Clarification Return Owner", 'UPDATE request_clarifications SET return_assignee_user_id = :newId WHERE return_assignee_user_id = :oldId AND status = "OPEN"', body.get("currentAssigneeUserId")),
         ("reportingManager", "Reporting Manager", 'UPDATE users SET reporting_manager_user_id = :newId WHERE reporting_manager_user_id = :oldId AND status = "ACTIVE"', body.get("reportingManagerUserId")),
@@ -313,7 +320,7 @@ def change_department(user_id: int, payload: ChangeDepartmentPayload, request: R
         raise ApiError(404, "User not found.")
     if not one(db, 'SELECT id, name FROM departments WHERE id = :id AND status = "ACTIVE"', {"id": payload.departmentId}):
         raise ApiError(400, "Choose an active department.")
-    assert_active_user(db, payload.reportingManagerUserId, "Reported To employee", allow_self_id=user_id, required_role_codes=["DEPARTMENT_HEAD", "SYSTEM_ADMIN"])
+    assert_active_user(db, payload.reportingManagerUserId, "Reporting Manager", allow_self_id=user_id, required_role_codes=["DEPARTMENT_HEAD", "SYSTEM_ADMIN"])
     assert_no_circular_reporting(db, user_id, payload.reportingManagerUserId)
     old_heads = rows(db, 'SELECT id FROM departments WHERE department_head_user_id = :userId AND status = "ACTIVE"', {"userId": user_id})
     if old_heads and int(existing.get("department_id") or 0) != int(payload.departmentId):
@@ -335,7 +342,7 @@ def change_reporting_manager(user_id: int, payload: ChangeReportingManagerPayloa
     existing = get_user_with_role(db, user_id)
     if not existing:
         raise ApiError(404, "User not found.")
-    assert_active_user(db, payload.reportingManagerUserId, "Reported To employee", allow_self_id=user_id, required_role_codes=["DEPARTMENT_HEAD", "SYSTEM_ADMIN"])
+    assert_active_user(db, payload.reportingManagerUserId, "Reporting Manager", allow_self_id=user_id, required_role_codes=["DEPARTMENT_HEAD", "SYSTEM_ADMIN"])
     assert_no_circular_reporting(db, user_id, payload.reportingManagerUserId)
     execute(db, "UPDATE users SET reporting_manager_user_id = :managerId WHERE id = :userId", {"managerId": payload.reportingManagerUserId, "userId": user_id})
     audit(db, actor_user_id=admin["id"], action="REPORTING_MANAGER_CHANGED", entity_type="USER", entity_id=user_id, old_value={"reportingManagerUserId": existing.get("reporting_manager_user_id")}, new_value={"reportingManagerUserId": payload.reportingManagerUserId}, request=request)
@@ -352,7 +359,7 @@ def reactivate(user_id: int, payload: ReactivatePayload, request: Request, admin
         raise ApiError(400, "Choose an active department.")
     if not get_role_by_id(db, payload.roleId):
         raise ApiError(400, "Choose an active role.")
-    assert_active_user(db, payload.reportingManagerUserId, "Reported To employee", allow_self_id=user_id, required_role_codes=["DEPARTMENT_HEAD", "SYSTEM_ADMIN"])
+    assert_active_user(db, payload.reportingManagerUserId, "Reporting Manager", allow_self_id=user_id, required_role_codes=["DEPARTMENT_HEAD", "SYSTEM_ADMIN"])
     assert_no_circular_reporting(db, user_id, payload.reportingManagerUserId)
     execute(db, """
         UPDATE users

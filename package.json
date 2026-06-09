@@ -11,7 +11,10 @@
     "build": "vite build --config frontend/vite.config.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:migrate": "node backend/src/db/run-sql.js backend/src/db/schema.sql",
-    "db:seed": "node backend/src/db/run-sql.js backend/src/db/seeds.sql"
+    "db:seed": "node backend/src/db/run-sql.js backend/src/db/seeds.sql",
+    "demo:reset": "node backend/src/db/run-sql.js backend/src/db/reset_enterprise_demo_data.sql && node backend/src/db/cleanup_demo_uploads.js",
+    "demo:seed": "node backend/src/db/run-sql.js backend/src/db/seed_enterprise_demo_data.sql",
+    "demo:validate": "node backend/src/db/run-sql.js backend/src/db/validate_enterprise_demo_data.sql"
   },
   "keywords": [],
   "author": "",

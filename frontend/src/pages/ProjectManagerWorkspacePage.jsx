@@ -14,8 +14,6 @@ import {
   InputAdornment,
   LinearProgress,
   MenuItem,
-  Paper,
-  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -40,6 +38,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
+import { useToast } from '../components/ToastProvider';
 import { formatEnum } from '../utils/constants';
 
 const moduleMeta = {
@@ -63,11 +62,6 @@ const moduleMeta = {
     title: 'Sprint Management',
     description: 'Plan, update, start, and complete delivery sprints.',
   },
-  tasks: {
-    eyebrow: 'SPRINT EXECUTION',
-    title: 'Sprint Task Board',
-    description: 'Manage sprint tasks, developer ownership, and delivery status.',
-  },
 };
 
 const scopeFormDefaults = {
@@ -76,9 +70,43 @@ const scopeFormDefaults = {
   businessObjectives: '',
   inScope: '',
   outOfScope: '',
-  assumptions: '',
-  dependencies: '',
 };
+
+function splitScopeItems(value, { keepEmpty = false } = {}) {
+  let source = value;
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) source = parsed;
+    } catch {
+      source = value;
+    }
+  }
+  const items = Array.isArray(source)
+    ? source.map((item) => String(item ?? '').trim())
+    : String(source || '')
+      .split(/\r?\n/)
+      .map((item) => item.replace(/^[-*+•]\s*/, '').trim());
+  return keepEmpty ? items : items.filter(Boolean);
+}
+
+function formatScopeItems(items) {
+  return JSON.stringify(items.map((item) => item.trim()).filter(Boolean));
+}
+
+function updateScopeItemValue(value, index, nextItem) {
+  const items = splitScopeItems(value, { keepEmpty: true });
+  items[index] = nextItem;
+  return formatScopeItems(items);
+}
+
+function removeScopeItemValue(value, index) {
+  return formatScopeItems(splitScopeItems(value, { keepEmpty: true }).filter((_, itemIndex) => itemIndex !== index));
+}
+
+function addScopeItemValue(value) {
+  return JSON.stringify([...splitScopeItems(value, { keepEmpty: true }), '']);
+}
 
 const storyFormDefaults = {
   storyKey: '',
@@ -97,28 +125,20 @@ const sprintFormDefaults = {
   actualHours: '',
 };
 
-const taskFormDefaults = {
-  userStoryId: '',
-  title: '',
-  description: '',
-  assignedDeveloperUserId: '',
-  estimateHours: '',
-  actualHours: '',
-  priority: 'MEDIUM',
-  status: 'TODO',
-};
-
-const kanbanColumns = [
-  { value: 'TODO', label: 'To Do' },
-  { value: 'IN_PROGRESS', label: 'In Progress' },
-  { value: 'BLOCKED', label: 'Blocked' },
-  { value: 'DONE', label: 'Done' },
-  { value: 'CANCELLED', label: 'Cancelled' },
-];
-
 function normalizeDateInput(value) {
   if (!value) return '';
   return String(value).slice(0, 10);
+}
+
+function getFutureDateInputMin() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+}
+
+function isFutureDateInput(value) {
+  return Boolean(value) && value >= getFutureDateInputMin();
 }
 
 function formatDate(value) {
@@ -131,7 +151,7 @@ function requestStatusGroup(status) {
   if (['DEVELOPER_ASSIGNED', 'SPRINT_PLANNING'].includes(status)) return 'Sprint Setup';
   if (['IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'].includes(status)) return 'Development';
   if (['QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED'].includes(status)) return 'Review';
-  if (['DEPLOYMENT_PENDING', 'DEPLOYED', 'CLOSED'].includes(status)) return 'Delivery';
+  if (['DEPLOYMENT_PENDING', 'DEPLOYED', 'READY_FOR_COMPLETION', 'CLOSED'].includes(status)) return 'Delivery';
   return 'Intake';
 }
 
@@ -151,14 +171,11 @@ export function SprintManagementPage() {
   return <ProjectManagerWorkspace mode="sprints" />;
 }
 
-export function SprintTaskBoardPage() {
-  return <ProjectManagerWorkspace mode="tasks" />;
-}
-
 export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
   const theme = useTheme();
   const semantic = theme.custom.semantic;
   const { user } = useAuth();
+  const { showToast } = useToast();
   const meta = moduleMeta[mode] || moduleMeta.dashboard;
   const [projects, setProjects] = useState([]);
   const [selectedRequestId, setSelectedRequestId] = useState('');
@@ -166,23 +183,21 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
   const [stories, setStories] = useState([]);
   const [sprints, setSprints] = useState([]);
   const [tasksBySprint, setTasksBySprint] = useState({});
-  const [developers, setDevelopers] = useState([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState('');
-  const [toast, setToast] = useState('');
   const [scopeDialog, setScopeDialog] = useState({ open: false, item: null });
   const [storyDialog, setStoryDialog] = useState({ open: false, item: null });
   const [sprintDialog, setSprintDialog] = useState({ open: false, item: null });
-  const [taskDialog, setTaskDialog] = useState({ open: false, item: null, sprintId: null });
 
   const selectedProject = projects.find((project) => String(project.id) === String(selectedRequestId));
   const selectedSprint = sprints[0];
   const selectedSprintTasks = selectedSprint ? tasksBySprint[selectedSprint.id] || [] : [];
-  const canReviewScope = ['IT_HEAD', 'SYSTEM_ADMIN'].includes(user?.roleCode);
+  const canReviewScope = ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'].includes(user?.roleCode);
   const canReviewStories = ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'].includes(user?.roleCode);
   const canManagePmWork = ['PROJECT_MANAGER', 'SYSTEM_ADMIN'].includes(user?.roleCode);
+  const canSubmitPlanning = canManagePmWork && selectedProject && selectedProject.status === 'PM_ASSIGNED';
 
   async function loadProjects() {
     setLoading(true);
@@ -190,7 +205,7 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
     try {
       const requests = await api.get('/requests');
       const projectRows = (requests || []).filter((request) => (
-        request.project_manager_user_id || ['ASSIGNMENT_PENDING', 'PM_ASSIGNED', 'SCOPE_REVIEW', 'USER_STORY_REVIEW', 'DEVELOPER_ASSIGNED', 'SPRINT_PLANNING', 'IN_DEVELOPMENT', 'QA_PENDING', 'UAT_PENDING', 'DEPLOYMENT_PENDING'].includes(request.status)
+        request.project_manager_user_id || ['ASSIGNMENT_PENDING', 'PM_ASSIGNED', 'SCOPE_REVIEW', 'USER_STORY_REVIEW', 'DEVELOPER_ASSIGNED', 'SPRINT_PLANNING', 'IN_DEVELOPMENT', 'QA_PENDING', 'UAT_PENDING', 'DEPLOYMENT_PENDING', 'READY_FOR_COMPLETION'].includes(request.status)
       ));
       setProjects(projectRows);
       setSelectedRequestId((current) => current || (projectRows[0]?.id ? String(projectRows[0].id) : ''));
@@ -198,15 +213,6 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
       setError(err.message);
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function loadDevelopers() {
-    try {
-      const users = await api.get('/users');
-      setDevelopers((users || []).filter((item) => item.role_code === 'DEVELOPER' && item.status === 'ACTIVE'));
-    } catch {
-      setDevelopers([]);
     }
   }
 
@@ -241,7 +247,6 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
 
   useEffect(() => {
     loadProjects();
-    loadDevelopers();
   }, []);
 
   useEffect(() => {
@@ -270,7 +275,7 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
   async function runAction(action, successMessage) {
     try {
       await action();
-      setToast(successMessage);
+      showToast(successMessage);
       await Promise.all([loadProjects(), loadProjectDetails(selectedRequestId)]);
     } catch (err) {
       setError(err.message);
@@ -300,6 +305,10 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
   }
 
   async function saveSprint(values, item) {
+    if (!isFutureDateInput(values.endDate)) {
+      setError('Sprint end date must be after today.');
+      return;
+    }
     const payload = {
       ...values,
       estimatedHours: values.estimatedHours === '' ? null : Number(values.estimatedHours),
@@ -315,21 +324,11 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
     setSprintDialog({ open: false, item: null });
   }
 
-  async function saveTask(values, item, sprintId) {
-    const payload = {
-      ...values,
-      userStoryId: values.userStoryId || null,
-      assignedDeveloperUserId: values.assignedDeveloperUserId || null,
-      estimateHours: values.estimateHours === '' ? null : Number(values.estimateHours),
-      actualHours: values.actualHours === '' ? null : Number(values.actualHours),
-    };
+  async function submitPlanningPackage() {
     await runAction(
-      () => item
-        ? api.put(`/requests/${selectedRequestId}/sprints/${sprintId}/tasks/${item.id}`, payload)
-        : api.post(`/requests/${selectedRequestId}/sprints/${sprintId}/tasks`, payload),
-      item ? 'Sprint task updated successfully.' : 'Sprint task created successfully.',
+      () => api.post(`/requests/${selectedRequestId}/planning/submit`),
+      'Planning package submitted for Department HOD review.',
     );
-    setTaskDialog({ open: false, item: null, sprintId: null });
   }
 
   return (
@@ -343,7 +342,7 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
             {mode === 'scopes' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setScopeDialog({ open: true, item: null })} disabled={!selectedRequestId}>New Scope</Button>}
             {mode === 'stories' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setStoryDialog({ open: true, item: null })} disabled={!selectedRequestId}>New Story</Button>}
             {mode === 'sprints' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setSprintDialog({ open: true, item: null })} disabled={!selectedRequestId}>New Sprint</Button>}
-            {mode === 'tasks' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setTaskDialog({ open: true, item: null, sprintId: selectedSprint?.id })} disabled={!selectedSprint}>New Task</Button>}
+            {canSubmitPlanning && <Button startIcon={<SendOutlinedIcon />} variant="contained" color="success" onClick={submitPlanningPackage} disabled={!selectedRequestId}>Submit For Department Review</Button>}
             <Button variant="outlined" onClick={() => { loadProjects(); loadProjectDetails(selectedRequestId); }}>Refresh</Button>
           </Stack>
         )}
@@ -373,11 +372,10 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
             </Box>
           ) : (
             <>
-              {mode === 'dashboard' && <DashboardContent projects={filteredProjects} summary={summary} scopes={scopes} stories={stories} sprints={sprints} tasks={selectedSprintTasks} />}
+              {mode === 'dashboard' && <DashboardContent projects={filteredProjects} summary={summary} scopes={scopes} stories={stories} sprints={sprints} tasks={selectedSprintTasks} canSubmitPlanning={canSubmitPlanning} onSubmitPlanning={submitPlanningPackage} />}
               {mode === 'scopes' && <ScopeContent rows={scopes} onEdit={(item) => setScopeDialog({ open: true, item })} onSubmit={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/submit`), 'Scope submitted successfully.')} onApprove={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/approve`, { comment: 'Scope approved.' }), 'Scope approved successfully.')} onReject={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/reject`, { comment: 'Scope returned for rework.' }), 'Scope rejected successfully.')} canManage={canManagePmWork} canReview={canReviewScope} />}
               {mode === 'stories' && <StoryContent rows={stories} onEdit={(item) => setStoryDialog({ open: true, item })} onSubmit={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/submit`), 'User story submitted successfully.')} onApprove={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/approve`, { comment: 'User story approved.' }), 'User story approved successfully.')} onReject={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/reject`, { comment: 'User story returned for rework.' }), 'User story rejected successfully.')} canManage={canManagePmWork} canReview={canReviewStories} />}
               {mode === 'sprints' && <SprintContent rows={sprints} onEdit={(item) => setSprintDialog({ open: true, item })} onStart={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/sprints/${item.id}/start`, { comment: 'Sprint started.' }), 'Sprint started successfully.')} onComplete={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/sprints/${item.id}/complete`, { comment: 'Sprint completed.' }), 'Sprint completed successfully.')} canManage={canManagePmWork} />}
-              {mode === 'tasks' && <TaskBoard sprints={sprints} tasksBySprint={tasksBySprint} developers={developers} selectedSprint={selectedSprint} onEdit={(item, sprintId) => setTaskDialog({ open: true, item, sprintId })} onStatus={(task, sprintId, status) => runAction(() => api.post(`/requests/${selectedRequestId}/sprints/${sprintId}/tasks/${task.id}/status`, { status }), 'Task status updated successfully.')} canManage={canManagePmWork} />}
             </>
           )}
         </Grid>
@@ -386,8 +384,6 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
       <ScopeDialog open={scopeDialog.open} item={scopeDialog.item} onClose={() => setScopeDialog({ open: false, item: null })} onSave={saveScope} />
       <StoryDialog open={storyDialog.open} item={storyDialog.item} onClose={() => setStoryDialog({ open: false, item: null })} onSave={saveStory} />
       <SprintDialog open={sprintDialog.open} item={sprintDialog.item} onClose={() => setSprintDialog({ open: false, item: null })} onSave={saveSprint} />
-      <TaskDialog open={taskDialog.open} item={taskDialog.item} sprintId={taskDialog.sprintId} stories={stories} developers={developers} onClose={() => setTaskDialog({ open: false, item: null, sprintId: null })} onSave={saveTask} />
-      <Snackbar open={Boolean(toast)} autoHideDuration={3200} onClose={() => setToast('')} message={toast} />
     </Page>
   );
 }
@@ -461,9 +457,17 @@ function ProjectSnapshot({ project, summary }) {
   );
 }
 
-function DashboardContent({ projects, summary, scopes, stories, sprints, tasks }) {
+function DashboardContent({ projects, summary, scopes, stories, sprints, tasks, canSubmitPlanning, onSubmitPlanning }) {
   return (
     <Stack spacing={2}>
+      {canSubmitPlanning && (
+        <Alert
+          severity="info"
+          action={<Button color="inherit" size="small" onClick={onSubmitPlanning}>Submit For Review</Button>}
+        >
+          Create or update scope and user stories, then submit the planning package for Department HOD review.
+        </Alert>
+      )}
       <Grid container spacing={1.5}>
         <SummaryTile label="Assigned Projects" value={summary.assignedProjects} icon={<AssignmentOutlinedIcon />} />
         <SummaryTile label="Scope Review" value={summary.scopeReview} icon={<SendOutlinedIcon />} />
@@ -516,7 +520,7 @@ function ScopeContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, 
                 {canManage && <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => onEdit(scope)}>Edit</Button>}
                 {canManage && <Button size="small" startIcon={<SendOutlinedIcon />} onClick={() => onSubmit(scope)} disabled={scope.status === 'APPROVED'}>Submit</Button>}
                 {canReview && <Button size="small" color="success" onClick={() => onApprove(scope)} disabled={scope.status !== 'SUBMITTED'}>Approve</Button>}
-                {canReview && <Button size="small" color="error" onClick={() => onReject(scope)} disabled={scope.status !== 'SUBMITTED'}>Reject</Button>}
+                {canReview && <Button size="small" color="error" onClick={() => onReject(scope)} disabled={scope.status !== 'SUBMITTED'}>Request Changes</Button>}
               </RowActions>
             </TableCell>
           </TableRow>
@@ -547,7 +551,7 @@ function StoryContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, 
                 {canManage && <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => onEdit(story)}>Edit</Button>}
                 {canManage && <Button size="small" startIcon={<SendOutlinedIcon />} onClick={() => onSubmit(story)} disabled={story.status === 'APPROVED'}>Submit</Button>}
                 {canReview && <Button size="small" color="success" onClick={() => onApprove(story)} disabled={story.status !== 'SUBMITTED'}>Approve</Button>}
-                {canReview && <Button size="small" color="error" onClick={() => onReject(story)} disabled={story.status !== 'SUBMITTED'}>Reject</Button>}
+                {canReview && <Button size="small" color="error" onClick={() => onReject(story)} disabled={story.status !== 'SUBMITTED'}>Request Changes</Button>}
               </RowActions>
             </TableCell>
           </TableRow>
@@ -588,54 +592,6 @@ function SprintContent({ rows, onEdit, onStart, onComplete, canManage }) {
   );
 }
 
-function TaskBoard({ sprints, tasksBySprint, selectedSprint, developers, onEdit, onStatus, canManage }) {
-  const theme = useTheme();
-  const semantic = theme.custom.semantic;
-  if (!selectedSprint) {
-    return <ModulePanel title="Task Board"><EmptyState title="No sprint selected" description="Create a sprint before adding tasks." /></ModulePanel>;
-  }
-  const tasks = tasksBySprint[selectedSprint.id] || [];
-  return (
-    <Stack spacing={2}>
-      <ModulePanel title={`Task Board - ${selectedSprint.sprint_name}`}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(5, minmax(180px, 1fr))' }, gap: 1.5 }}>
-          {kanbanColumns.map((column) => (
-            <Box key={column.value} sx={{ p: 1.25, borderRadius: 2, border: `1px solid ${semantic.borderSoft}`, bgcolor: semantic.paperSoft, minHeight: 260 }}>
-              <Stack spacing={1.25}>
-                <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="subtitle2" fontWeight={750}>{column.label}</Typography>
-                  <Chip size="small" label={tasks.filter((task) => task.status === column.value).length} />
-                </Stack>
-                {tasks.filter((task) => task.status === column.value).map((task) => (
-                  <Paper key={task.id} variant="outlined" sx={{ p: 1.25, borderRadius: 1.5, bgcolor: semantic.elevated }}>
-                    <Stack spacing={1}>
-                      <Typography variant="body2" fontWeight={750}>{task.title}</Typography>
-                      <Typography variant="caption" color="text.secondary">{task.assigned_developer_name || 'No developer assigned'}</Typography>
-                      <StatusBadge value={task.priority} />
-                      <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap' }}>
-                        {canManage && <Button size="small" onClick={() => onEdit(task, selectedSprint.id)}>Edit</Button>}
-                        {kanbanColumns.filter((item) => item.value !== task.status).slice(0, 2).map((item) => (
-                          <Button key={item.value} size="small" onClick={() => onStatus(task, selectedSprint.id, item.value)}>{item.label}</Button>
-                        ))}
-                      </Stack>
-                    </Stack>
-                  </Paper>
-                ))}
-                {tasks.filter((task) => task.status === column.value).length === 0 && (
-                  <Typography variant="caption" color="text.secondary">No tasks</Typography>
-                )}
-              </Stack>
-            </Box>
-          ))}
-        </Box>
-      </ModulePanel>
-      <Typography variant="caption" color="text.secondary">
-        Developers available for assignment: {developers.length}
-      </Typography>
-    </Stack>
-  );
-}
-
 function ScopeDialog({ open, item, onClose, onSave }) {
   const [values, setValues] = useState(scopeFormDefaults);
   useEffect(() => {
@@ -645,8 +601,6 @@ function ScopeDialog({ open, item, onClose, onSave }) {
       businessObjectives: item.business_objectives || '',
       inScope: item.in_scope || '',
       outOfScope: item.out_of_scope || '',
-      assumptions: item.assumptions || '',
-      dependencies: item.dependencies || '',
     } : scopeFormDefaults);
   }, [item, open]);
   return (
@@ -654,11 +608,57 @@ function ScopeDialog({ open, item, onClose, onSave }) {
       <TextField label="Scope Title" value={values.scopeTitle} onChange={(event) => setValues({ ...values, scopeTitle: event.target.value })} fullWidth required />
       <TextField label="Scope Description" value={values.scopeDescription} onChange={(event) => setValues({ ...values, scopeDescription: event.target.value })} fullWidth multiline minRows={3} required />
       <TextField label="Business Objectives" value={values.businessObjectives} onChange={(event) => setValues({ ...values, businessObjectives: event.target.value })} fullWidth multiline minRows={2} />
-      <TextField label="In Scope" value={values.inScope} onChange={(event) => setValues({ ...values, inScope: event.target.value })} fullWidth multiline minRows={2} />
-      <TextField label="Out of Scope" value={values.outOfScope} onChange={(event) => setValues({ ...values, outOfScope: event.target.value })} fullWidth multiline minRows={2} />
-      <TextField label="Assumptions" value={values.assumptions} onChange={(event) => setValues({ ...values, assumptions: event.target.value })} fullWidth />
-      <TextField label="Dependencies" value={values.dependencies} onChange={(event) => setValues({ ...values, dependencies: event.target.value })} fullWidth />
+      <Grid container spacing={1.25}>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <ScopeListEditor
+            label="In Scope"
+            value={values.inScope}
+            tone="positive"
+            onChange={(value) => setValues({ ...values, inScope: value })}
+          />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <ScopeListEditor
+            label="Out Of Scope"
+            value={values.outOfScope}
+            tone="negative"
+            onChange={(value) => setValues({ ...values, outOfScope: value })}
+          />
+        </Grid>
+      </Grid>
     </EntityDialog>
+  );
+}
+
+function ScopeListEditor({ label, value, tone, onChange }) {
+  const items = splitScopeItems(value, { keepEmpty: true });
+  const displayItems = items.length ? items : [''];
+  return (
+    <Box sx={{ p: 1.25, borderRadius: 2, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}` }}>
+      <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+        <Typography variant="caption" color="text.secondary" fontWeight={850}>{label}</Typography>
+        <Button size="small" startIcon={<AddIcon />} onClick={() => onChange(addScopeItemValue(value))}>
+          Add Item
+        </Button>
+      </Stack>
+      <Stack spacing={0.9}>
+        {displayItems.map((item, index) => (
+          <Stack key={`${label}-${index}`} direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tone === 'negative' ? 'error.main' : 'success.main', flexShrink: 0 }} />
+            <TextField
+              size="small"
+              value={item}
+              onChange={(event) => onChange(updateScopeItemValue(value, index, event.target.value))}
+              placeholder={`${label} item`}
+              fullWidth
+            />
+            <IconButton size="small" color="error" onClick={() => onChange(removeScopeItemValue(value, index))} disabled={displayItems.length === 1 && !item}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+        ))}
+      </Stack>
+    </Box>
   );
 }
 
@@ -702,47 +702,19 @@ function SprintDialog({ open, item, onClose, onSave }) {
     <EntityDialog open={open} title={item ? 'Edit Sprint' : 'Create Sprint'} onClose={onClose} onSave={() => onSave(values, item)}>
       <TextField label="Sprint Name" value={values.sprintName} onChange={(event) => setValues({ ...values, sprintName: event.target.value })} fullWidth required />
       <TextField label="Goal" value={values.goal} onChange={(event) => setValues({ ...values, goal: event.target.value })} fullWidth multiline minRows={2} />
-      <TextField label="Start Date" type="date" value={values.startDate} onChange={(event) => setValues({ ...values, startDate: event.target.value })} fullWidth InputLabelProps={{ shrink: true }} />
-      <TextField label="End Date" type="date" value={values.endDate} onChange={(event) => setValues({ ...values, endDate: event.target.value })} fullWidth InputLabelProps={{ shrink: true }} />
+      <Box>
+        <Typography variant="caption" color="text.secondary" fontWeight={850} sx={{ display: 'block', mb: 0.65 }}>
+          Start Date
+        </Typography>
+        <TextField type="date" value={values.startDate} onChange={(event) => setValues({ ...values, startDate: event.target.value })} fullWidth inputProps={{ min: getFutureDateInputMin(), 'aria-label': 'Start Date' }} helperText="Select a start date after today." />
+      </Box>
+      <Box>
+        <Typography variant="caption" color="text.secondary" fontWeight={850} sx={{ display: 'block', mb: 0.65 }}>
+          End Date
+        </Typography>
+        <TextField type="date" value={values.endDate} onChange={(event) => setValues({ ...values, endDate: event.target.value })} fullWidth inputProps={{ min: getFutureDateInputMin(), 'aria-label': 'End Date' }} helperText="Select an end date after today." required />
+      </Box>
       <TextField label="Estimated Hours" type="number" value={values.estimatedHours} onChange={(event) => setValues({ ...values, estimatedHours: event.target.value })} fullWidth />
-      <TextField label="Actual Hours" type="number" value={values.actualHours} onChange={(event) => setValues({ ...values, actualHours: event.target.value })} fullWidth />
-    </EntityDialog>
-  );
-}
-
-function TaskDialog({ open, item, sprintId, stories, developers, onClose, onSave }) {
-  const [values, setValues] = useState(taskFormDefaults);
-  useEffect(() => {
-    setValues(item ? {
-      userStoryId: item.user_story_id || '',
-      title: item.title || '',
-      description: item.description || '',
-      assignedDeveloperUserId: item.assigned_developer_user_id || '',
-      estimateHours: item.estimate_hours || '',
-      actualHours: item.actual_hours || '',
-      priority: item.priority || 'MEDIUM',
-      status: item.status || 'TODO',
-    } : taskFormDefaults);
-  }, [item, open]);
-  return (
-    <EntityDialog open={open} title={item ? 'Edit Sprint Task' : 'Create Sprint Task'} onClose={onClose} onSave={() => onSave(values, item, sprintId)}>
-      <TextField select label="User Story" value={values.userStoryId} onChange={(event) => setValues({ ...values, userStoryId: event.target.value })} fullWidth>
-        <MenuItem value="">No linked story</MenuItem>
-        {stories.map((story) => <MenuItem key={story.id} value={story.id}>{story.story_key ? `${story.story_key} - ` : ''}{story.title}</MenuItem>)}
-      </TextField>
-      <TextField label="Title" value={values.title} onChange={(event) => setValues({ ...values, title: event.target.value })} fullWidth required />
-      <TextField label="Description" value={values.description} onChange={(event) => setValues({ ...values, description: event.target.value })} fullWidth multiline minRows={2} />
-      <TextField select label="Assigned Developer" value={values.assignedDeveloperUserId} onChange={(event) => setValues({ ...values, assignedDeveloperUserId: event.target.value })} fullWidth>
-        <MenuItem value="">Unassigned</MenuItem>
-        {developers.map((developer) => <MenuItem key={developer.id} value={developer.id}>{developer.full_name}</MenuItem>)}
-      </TextField>
-      <TextField select label="Priority" value={values.priority} onChange={(event) => setValues({ ...values, priority: event.target.value })} fullWidth>
-        {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((priority) => <MenuItem key={priority} value={priority}>{formatEnum(priority)}</MenuItem>)}
-      </TextField>
-      <TextField select label="Status" value={values.status} onChange={(event) => setValues({ ...values, status: event.target.value })} fullWidth>
-        {kanbanColumns.map((status) => <MenuItem key={status.value} value={status.value}>{status.label}</MenuItem>)}
-      </TextField>
-      <TextField label="Estimate Hours" type="number" value={values.estimateHours} onChange={(event) => setValues({ ...values, estimateHours: event.target.value })} fullWidth />
       <TextField label="Actual Hours" type="number" value={values.actualHours} onChange={(event) => setValues({ ...values, actualHours: event.target.value })} fullWidth />
     </EntityDialog>
   );

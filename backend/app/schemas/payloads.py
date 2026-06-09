@@ -8,7 +8,7 @@ from app.schemas.common import CamelModel
 
 class RegisterPayload(CamelModel):
     fullName: str = Field(min_length=2)
-    employeeId: str = Field(min_length=2)
+    employeeId: str | None = None
     email: str = Field(min_length=3)
     mobileNumber: str | None = Field(default=None, min_length=5)
     designation: str = Field(min_length=2)
@@ -121,17 +121,26 @@ class RequestCreatePayload(CamelModel):
     expectedBenefits: str | None = None
     roiType: Literal["TIME_SAVINGS", "COST_SAVINGS"] | None = None
     roiHoursSavedPerEmployeePerMonth: float | None = Field(default=None, ge=0)
+    roiUsersImpacted: int | None = Field(default=None, ge=0)
+    roiTimeSavedPerTask: float | None = Field(default=None, ge=0)
+    roiTimeSavedUnit: Literal["MINUTES", "HOURS"] | None = "MINUTES"
+    roiOccurrencesPerMonth: int | None = Field(default=None, ge=0)
     roiEmployeesBenefited: int | None = Field(default=None, ge=0)
+    roiEstimatedHourlyCostInr: float | None = Field(default=None, ge=0)
+    roiEstimatedRevenueImpactInr: float | None = Field(default=None, ge=0)
+    roiBusinessImpactCategory: Literal[
+        "PRODUCTIVITY_IMPROVEMENT",
+        "COST_REDUCTION",
+        "REVENUE_INCREASE",
+        "PROCESS_AUTOMATION",
+        "COMPLIANCE",
+        "QUALITY_IMPROVEMENT",
+        "CUSTOMER_SATISFACTION",
+    ] | None = None
     roiMonthlyCostSavingsInr: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_roi_values(self):
-        if self.roiType == "TIME_SAVINGS" and (
-            self.roiHoursSavedPerEmployeePerMonth is None or self.roiEmployeesBenefited is None
-        ):
-            raise ValueError("Hours saved and employees benefited are required for time savings ROI.")
-        if self.roiType == "COST_SAVINGS" and self.roiMonthlyCostSavingsInr is None:
-            raise ValueError("Monthly cost savings is required for cost savings ROI.")
         return self
 
 
@@ -145,17 +154,26 @@ class RequestDetailsPayload(CamelModel):
 class RoiPayload(CamelModel):
     roiType: Literal["TIME_SAVINGS", "COST_SAVINGS"] | None = None
     roiHoursSavedPerEmployeePerMonth: float | None = Field(default=None, ge=0)
+    roiUsersImpacted: int | None = Field(default=None, ge=0)
+    roiTimeSavedPerTask: float | None = Field(default=None, ge=0)
+    roiTimeSavedUnit: Literal["MINUTES", "HOURS"] | None = "MINUTES"
+    roiOccurrencesPerMonth: int | None = Field(default=None, ge=0)
     roiEmployeesBenefited: int | None = Field(default=None, ge=0)
+    roiEstimatedHourlyCostInr: float | None = Field(default=None, ge=0)
+    roiEstimatedRevenueImpactInr: float | None = Field(default=None, ge=0)
+    roiBusinessImpactCategory: Literal[
+        "PRODUCTIVITY_IMPROVEMENT",
+        "COST_REDUCTION",
+        "REVENUE_INCREASE",
+        "PROCESS_AUTOMATION",
+        "COMPLIANCE",
+        "QUALITY_IMPROVEMENT",
+        "CUSTOMER_SATISFACTION",
+    ] | None = None
     roiMonthlyCostSavingsInr: float | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_roi_values(self):
-        if self.roiType == "TIME_SAVINGS" and (
-            self.roiHoursSavedPerEmployeePerMonth is None or self.roiEmployeesBenefited is None
-        ):
-            raise ValueError("Hours saved and employees benefited are required for time savings ROI.")
-        if self.roiType == "COST_SAVINGS" and self.roiMonthlyCostSavingsInr is None:
-            raise ValueError("Monthly cost savings is required for cost savings ROI.")
         return self
 
 
@@ -204,13 +222,12 @@ class ProjectManagerAssignPayload(CamelModel):
 
 class ProjectScopePayload(CamelModel):
     scopeTitle: str = Field(min_length=3, max_length=255)
-    scopeDescription: str = Field(min_length=10)
+    scopeDescription: str | None = None
     businessObjectives: str | None = None
     inScope: str | None = None
     outOfScope: str | None = None
-    assumptions: str | None = None
-    dependencies: str | None = None
     status: Literal["DRAFT", "SUBMITTED"] = "DRAFT"
+    reviewerComment: str | None = None
 
 
 class ProjectScopeReviewPayload(CamelModel):
@@ -225,6 +242,23 @@ class UserStoryPayload(CamelModel):
     acceptanceCriteria: str = Field(min_length=5)
     priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
     status: Literal["DRAFT", "SUBMITTED"] = "DRAFT"
+    reviewerComment: str | None = None
+
+
+class RequirementPackageStoryPayload(CamelModel):
+    id: int | None = Field(default=None, gt=0)
+    storyKey: str | None = Field(default=None, max_length=80)
+    title: str | None = Field(default=None, min_length=3, max_length=255)
+    description: str | None = Field(default=None, min_length=10)
+    acceptanceCriteria: str | None = Field(default=None, min_length=5)
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+    delete: bool = False
+
+
+class RequirementPackageUpdatePayload(CamelModel):
+    scope: ProjectScopePayload
+    userStories: list[RequirementPackageStoryPayload]
+    changeJustification: str = Field(min_length=3)
 
 
 class UserStoryReviewPayload(CamelModel):
@@ -239,18 +273,38 @@ class SprintPayload(CamelModel):
     endDate: date | None = None
     estimatedHours: float | None = Field(default=None, ge=0)
     actualHours: float | None = Field(default=None, ge=0)
+    notes: str | None = None
+    assignedDeveloperUserId: int | None = Field(default=None, gt=0)
     status: Literal["PLANNED", "CREATED"] = "PLANNED"
+
+    @field_validator("endDate")
+    @classmethod
+    def end_date_must_be_after_today(cls, value: date | None) -> date | None:
+        if value is not None and value <= date.today():
+            raise ValueError("Sprint due date must be after today.")
+        return value
 
 
 class SprintTaskPayload(CamelModel):
+    taskKey: str | None = Field(default=None, max_length=80)
     userStoryId: int | None = Field(default=None, gt=0)
     title: str = Field(min_length=3, max_length=255)
     description: str | None = None
     assignedDeveloperUserId: int | None = Field(default=None, gt=0)
     estimateHours: float | None = Field(default=None, ge=0)
     actualHours: float | None = Field(default=None, ge=0)
+    progressPercentage: int | None = Field(default=None, ge=0, le=100)
+    blockedReason: str | None = None
+    dueDate: date | None = None
     priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
     status: Literal["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"] = "TODO"
+
+    @field_validator("dueDate")
+    @classmethod
+    def due_date_must_be_after_today(cls, value: date | None) -> date | None:
+        if value is not None and value <= date.today():
+            raise ValueError("Task due date must be after today.")
+        return value
 
 
 class SprintTaskAssignPayload(CamelModel):
@@ -260,12 +314,43 @@ class SprintTaskAssignPayload(CamelModel):
 class SprintTaskStatusPayload(CamelModel):
     status: Literal["TODO", "IN_PROGRESS", "BLOCKED", "DONE", "CANCELLED"]
     actualHours: float | None = Field(default=None, ge=0)
+    progressPercentage: int | None = Field(default=None, ge=0, le=100)
+    blockedReason: str | None = None
+    comment: str | None = None
+
+
+class SprintTaskBlockerPayload(CamelModel):
+    blockerTitle: str = Field(min_length=3, max_length=255)
+    description: str = Field(min_length=3)
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "MEDIUM"
+    additionalNotes: str | None = None
+
+
+class SprintTaskCommentPayload(CamelModel):
+    commentText: str = Field(min_length=1)
+    commentType: Literal["GENERAL", "PROGRESS", "BLOCKER", "COMPLETION"] = "GENERAL"
 
 
 class AssignPayload(CamelModel):
-    developerUserId: int = Field(gt=0)
-    qaUserId: int = Field(gt=0)
+    developerUserId: int | None = Field(default=None, gt=0)
+    qaUserId: int | None = Field(default=None, gt=0)
     notes: str | None = None
+
+
+class SubmitForQaPayload(CamelModel):
+    qaUserId: int = Field(gt=0)
+    comment: str | None = None
+
+
+class QaReworkTaskPayload(CamelModel):
+    title: str = Field(min_length=3, max_length=255)
+    description: str | None = None
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "HIGH"
+
+
+class QaReworkPayload(CamelModel):
+    comment: str | None = None
+    tasks: list[QaReworkTaskPayload] = Field(min_length=1)
 
 
 class TestResultPayload(CamelModel):
