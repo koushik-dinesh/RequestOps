@@ -13,6 +13,9 @@ from app.utils.http import ApiError, ok
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+NON_IT_DEPARTMENT_DESIGNATIONS = {"Department Head", "Employee"}
+IT_DEPARTMENT_DESIGNATIONS = {"Department Head", "Project Manager", "QA", "Developer"}
+
 
 def next_employee_id(db: Session) -> str:
     result = one(
@@ -42,6 +45,11 @@ def normalize_employee_id(db: Session, employee_id: str | None) -> str:
     return normalized
 
 
+def allowed_designations_for_department(department: dict) -> set[str]:
+    is_it_department = str(department.get("code") or "").upper() == "IT" or str(department.get("name") or "").strip().upper() == "IT"
+    return IT_DEPARTMENT_DESIGNATIONS if is_it_department else NON_IT_DEPARTMENT_DESIGNATIONS
+
+
 @router.get("/providers")
 def providers():
     return ok([
@@ -53,13 +61,11 @@ def providers():
 @router.get("/designations")
 def designations():
     return ok([
-        "System Admin / Head / CEO",
-        "IT Head",
-        "IT Manager",
-        "Developer",
-        "QA",
         "Department Head",
         "Employee",
+        "Project Manager",
+        "QA",
+        "Developer",
     ])
 
 
@@ -88,6 +94,12 @@ def register(payload: RegisterPayload, request: Request, background_tasks: Backg
     )
     if existing_registrations:
         raise ApiError(409, "Registration is already pending approval.")
+    department = one(db, 'SELECT id, name, code FROM departments WHERE id = :departmentId AND status = "ACTIVE"', {"departmentId": payload.departmentId})
+    if not department:
+        raise ApiError(400, "Choose an active department.")
+    allowed_designations = allowed_designations_for_department(department)
+    if payload.designation not in allowed_designations:
+        raise ApiError(400, "Choose a valid designation for the selected department.")
     result = execute(
         db,
         """

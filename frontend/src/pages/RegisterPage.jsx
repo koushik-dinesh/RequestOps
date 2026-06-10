@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -29,23 +29,29 @@ const emptyForm = {
   confirmPassword: '',
 };
 
-const fallbackDesignations = [
-  'System Admin / Head / CEO',
-  'IT Head',
-  'IT Manager',
-  'Developer',
-  'QA',
-  'Department Head',
-  'Employee',
-];
+const nonItDepartmentDesignations = ['Department Head', 'Employee'];
+const itDepartmentDesignations = ['Department Head', 'Project Manager', 'QA', 'Developer'];
 
-function validateRegistrationForm(form) {
+function isItDepartment(department) {
+  return String(department?.code || '').toUpperCase() === 'IT'
+    || String(department?.name || '').trim().toUpperCase() === 'IT';
+}
+
+function designationOptionsForDepartment(department) {
+  if (!department) return [];
+  return isItDepartment(department) ? itDepartmentDesignations : nonItDepartmentDesignations;
+}
+
+function validateRegistrationForm(form, departments) {
   const errors = {};
+  const selectedDepartment = departments.find((department) => String(department.id) === String(form.departmentId));
+  const designationOptions = designationOptionsForDepartment(selectedDepartment);
   if (form.fullName.trim().length < 3) errors.fullName = 'Full name must be at least 3 characters.';
   if (!form.employeeId.trim()) errors.employeeId = 'Employee ID is required.';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) errors.email = 'Enter a valid company email.';
-  if (!form.designation) errors.designation = 'Designation is required.';
   if (!form.departmentId) errors.departmentId = 'Requested department is required.';
+  if (form.departmentId && !form.designation) errors.designation = 'Designation is required.';
+  if (form.designation && !designationOptions.includes(form.designation)) errors.designation = 'Choose a valid designation for the selected department.';
   if (form.password.length < 8) errors.password = 'Password must be at least 8 characters.';
   if (form.confirmPassword !== form.password) errors.confirmPassword = 'Passwords do not match.';
   return errors;
@@ -58,21 +64,32 @@ export default function RegisterPage() {
   const [form, setForm] = useState(emptyForm);
   const [fieldErrors, setFieldErrors] = useState({});
   const [departments, setDepartments] = useState([]);
-  const [designations, setDesignations] = useState(fallbackDesignations);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const selectedDepartment = useMemo(
+    () => departments.find((department) => String(department.id) === String(form.departmentId)),
+    [departments, form.departmentId],
+  );
+  const designations = useMemo(() => designationOptionsForDepartment(selectedDepartment), [selectedDepartment]);
 
   useEffect(() => {
     api.get('/departments?status=ACTIVE').then(setDepartments).catch(() => setDepartments([]));
     api.get('/auth/next-employee-id')
       .then((result) => setForm((current) => ({ ...current, employeeId: result.employeeId || '' })))
       .catch(() => {});
-    setDesignations(fallbackDesignations);
   }, []);
 
   function update(field, value) {
-    setForm((current) => ({ ...current, [field]: value }));
-    setFieldErrors((current) => ({ ...current, [field]: '' }));
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === 'departmentId' ? { designation: '' } : {}),
+    }));
+    setFieldErrors((current) => ({
+      ...current,
+      [field]: '',
+      ...(field === 'departmentId' ? { designation: '' } : {}),
+    }));
   }
 
   function focusFirstInvalidField(errors) {
@@ -85,7 +102,7 @@ export default function RegisterPage() {
     event.preventDefault();
     setError('');
     setMessage('');
-    const validationErrors = validateRegistrationForm(form);
+    const validationErrors = validateRegistrationForm(form, departments);
     if (Object.keys(validationErrors).length) {
       const summary = Object.values(validationErrors).filter(Boolean).join(' ');
       setFieldErrors(validationErrors);
@@ -130,14 +147,25 @@ export default function RegisterPage() {
               <TextField name="mobileNumber" label="Mobile Number" value={form.mobileNumber} onChange={(e) => update('mobileNumber', e.target.value)} fullWidth />
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <TextField name="designation" select label="Designation" value={form.designation} onChange={(e) => update('designation', e.target.value)} fullWidth required error={Boolean(fieldErrors.designation)} helperText={fieldErrors.designation}>
-                {designations.map((designation) => (
-                  <MenuItem key={designation} value={designation}>{designation}</MenuItem>
-                ))}
-              </TextField>
               <TextField name="departmentId" select label="Requested Department" value={form.departmentId} onChange={(e) => update('departmentId', e.target.value)} fullWidth required error={Boolean(fieldErrors.departmentId)} helperText={fieldErrors.departmentId}>
                 {departments.map((department) => (
                   <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                name="designation"
+                select
+                label="Designation"
+                value={form.designation}
+                onChange={(e) => update('designation', e.target.value)}
+                fullWidth
+                required
+                disabled={!form.departmentId}
+                error={Boolean(fieldErrors.designation)}
+                helperText={fieldErrors.designation || (!form.departmentId ? 'Select department first.' : 'Choose the role applicable to the selected department.')}
+              >
+                {designations.map((designation) => (
+                  <MenuItem key={designation} value={designation}>{designation}</MenuItem>
                 ))}
               </TextField>
             </Stack>

@@ -59,6 +59,22 @@ class PasswordPayload(CamelModel):
     password: str = Field(min_length=8)
 
 
+class DailyProgressReportConfigPayload(CamelModel):
+    isEnabled: bool = True
+    reportTime: str = Field(default="19:00", pattern=r"^\d{2}:\d{2}$")
+    recipientUserIds: list[int] = Field(default_factory=list)
+    staleThresholdDays: int = Field(default=3, ge=1, le=90)
+    overdueThresholdDays: int = Field(default=7, ge=1, le=365)
+
+    @field_validator("reportTime")
+    @classmethod
+    def valid_report_time(cls, value: str) -> str:
+        hour, minute = value.split(":")
+        if int(hour) > 23 or int(minute) > 59:
+            raise ValueError("Report time must use 24-hour HH:MM format.")
+        return value
+
+
 class DepartmentPayload(CamelModel):
     name: str | None = Field(default=None, min_length=2)
     code: str | None = Field(default=None, min_length=2, max_length=20)

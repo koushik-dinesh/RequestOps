@@ -370,10 +370,46 @@ function DeveloperDetailsDrawer({ developer, onClose }) {
   const theme = useTheme();
   const semantic = theme.custom.semantic;
   return (
-    <Drawer anchor="right" open={Boolean(developer)} onClose={onClose} PaperProps={{ sx: { width: { xs: '100%', sm: 560 }, bgcolor: semantic.paperSoft } }}>
+    <Drawer
+      anchor="right"
+      open={Boolean(developer)}
+      onClose={onClose}
+      ModalProps={{ keepMounted: true }}
+      sx={{
+        zIndex: (currentTheme) => currentTheme.zIndex.modal + 20,
+        '& .MuiDrawer-paper': {
+          zIndex: (currentTheme) => currentTheme.zIndex.modal + 20,
+        },
+      }}
+      PaperProps={{
+        sx: {
+          width: { xs: '100%', sm: 560 },
+          height: '100dvh',
+          maxHeight: '100dvh',
+          bgcolor: semantic.paperSoft,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+      }}
+    >
       {developer && (
-        <Stack sx={{ height: '100%' }}>
-          <Stack direction="row" spacing={1.5} sx={{ p: 2.25, justifyContent: 'space-between', alignItems: 'center', bgcolor: semantic.paper, borderBottom: `1px solid ${semantic.borderSoft}` }}>
+        <Stack sx={{ height: '100%', minHeight: 0 }}>
+          <Stack
+            direction="row"
+            spacing={1.5}
+            sx={{
+              p: 2.25,
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              bgcolor: semantic.paper,
+              borderBottom: `1px solid ${semantic.borderSoft}`,
+              flexShrink: 0,
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+            }}
+          >
             <Box>
               <Typography variant="caption" color="primary.main" fontWeight={750} sx={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}>Developer Workload</Typography>
               <Typography variant="h5" fontWeight={750}>{developer.full_name}</Typography>
@@ -382,7 +418,7 @@ function DeveloperDetailsDrawer({ developer, onClose }) {
             <IconButton onClick={onClose}><CloseIcon /></IconButton>
           </Stack>
 
-          <Stack spacing={1.5} sx={{ p: 2, overflowY: 'auto' }}>
+          <Stack spacing={1.5} sx={{ p: 2, overflowY: 'auto', flex: 1, minHeight: 0 }}>
             <Box sx={{ p: 1.5, borderRadius: 1.5, bgcolor: semantic.paper, border: `1px solid ${semantic.borderSoft}` }}>
               <Stack direction="row" spacing={1} sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="subtitle2">Developer Information</Typography>

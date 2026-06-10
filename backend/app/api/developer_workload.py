@@ -3,12 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db, rows
 from app.middleware.auth import get_current_user
-from app.utils.http import ApiError, ok
+from app.utils.http import ok
 
 
 router = APIRouter(prefix="/developer-workload", tags=["developer-workload"], dependencies=[Depends(get_current_user)])
 
-ALLOWED_ROLES = {"SYSTEM_ADMIN", "IT_HEAD", "PROJECT_MANAGER", "DEVELOPER", "QA"}
 ACTIVE_WORK_STATUSES = [
     "DEVELOPER_ASSIGNED",
     "SPRINT_PLANNING",
@@ -45,10 +44,7 @@ def active_status_sql() -> str:
 
 
 @router.get("/")
-def list_developer_workload(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
-    if user["role_code"] not in ALLOWED_ROLES:
-        raise ApiError(403, "You do not have access to Developer Workload.")
-
+def list_developer_workload(_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     developers = rows(db, f"""
         SELECT
             u.id,

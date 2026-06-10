@@ -14,6 +14,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import OrganizationDirectoryPage from './pages/OrganizationDirectoryPage';
 import UserManualPage from './pages/UserManualPage';
 import DeveloperWorkloadPage from './pages/DeveloperWorkloadPage';
+import DailyProgressReportsPage from './pages/DailyProgressReportsPage';
 import {
   ProjectManagerDashboardPage,
   ScopeManagementPage,
@@ -52,6 +53,9 @@ export default function App() {
           </Route>
           <Route element={<RoleRoute roles={routePermissions['/developer-workload']} />}>
             <Route path="/developer-workload" element={<DeveloperWorkloadPage />} />
+          </Route>
+          <Route element={<RoleRoute roles={routePermissions['/daily-progress-reports']} />}>
+            <Route path="/daily-progress-reports" element={<DailyProgressReportsPage />} />
           </Route>
           <Route element={<RoleRoute roles={routePermissions['/testing']} />}>
             <Route path="/testing" element={<RequestsPage presetStatus="IN_TESTING" />} />

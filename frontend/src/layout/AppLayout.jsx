@@ -43,7 +43,6 @@ import {
   Gauge,
   LogOut,
   Plus,
-  Settings,
   ShieldCheck,
   UsersRound,
 } from 'lucide-react';
@@ -72,6 +71,7 @@ const navGroups = [
     label: 'Operations',
     items: [
       { label: 'Developer Workload', path: '/developer-workload', icon: Gauge, route: '/developer-workload' },
+      { label: 'Daily Progress Reports', path: '/daily-progress-reports', icon: ClipboardList, route: '/daily-progress-reports' },
     ],
   },
   {
@@ -327,21 +327,6 @@ export default function AppLayout() {
           <Box sx={{ mt: 'auto' }}>
             <Divider sx={{ borderColor: sidebarBorder, mb: 0.75 }} />
             <Stack spacing={0.15}>
-              <ListItemButton
-                onClick={(event) => setProfileAnchor(event.currentTarget)}
-                sx={{
-                  minHeight: 36,
-                  borderRadius: 1.5,
-                  justifyContent: effectiveCollapsed ? 'center' : 'flex-start',
-                  px: effectiveCollapsed ? 0 : 1,
-                  gap: effectiveCollapsed ? 0 : 1.1,
-                  color: sidebarText,
-                  '&:hover': { bgcolor: sidebarHoverBg },
-                }}
-              >
-                <Settings size={sidebarIconSize} strokeWidth={2} />
-                {!effectiveCollapsed && <Typography sx={{ fontSize: 13, fontWeight: 600 }}>Settings</Typography>}
-              </ListItemButton>
               <ListItemButton
                 onClick={logout}
                 sx={{
