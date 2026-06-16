@@ -105,8 +105,9 @@ Example production `.env`:
 
 ```env
 NODE_ENV=production
-PORT=4000
+PORT=5015
 CLIENT_ORIGIN=https://requestops.client-domain.com
+APP_PUBLIC_BASE_URL=https://requestops.client-domain.com/srt
 
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -133,7 +134,7 @@ SMTP_TLS=true
 
 EMAIL_LOGO_PATH=backend/app/assets/violin-technologies-logo.png
 
-VITE_API_BASE_URL=https://requestops.client-domain.com/api/v1
+VITE_API_BASE_URL=
 ```
 
 Important:
@@ -141,8 +142,12 @@ Important:
 - Do not reuse local development secrets.
 - Do not commit `.env`.
 - `CLIENT_ORIGIN` must match the frontend domain.
-- `VITE_API_BASE_URL` must point to the public API URL.
-- If frontend and backend are served from the same domain through Nginx, use `/api/v1` routing as shown later in this guide.
+- `CLIENT_ORIGIN` is an origin only. Do not include `/srt`.
+- `APP_PUBLIC_BASE_URL` is used for user-facing email and notification links. Include `/srt`.
+- Leave `VITE_API_BASE_URL` empty when frontend and API are served from the same domain; the frontend will use `/srt/api/v1`.
+- Set `VITE_API_BASE_URL` only when the API is served from a separate public domain.
+- `PORT` controls the FastAPI backend port used by `npm run start`.
+- The browser-visible API path is `/srt/api/v1`; the backend internally keeps routes mounted at `/api/v1`.
 
 ## 7. Create Database Tables
 
@@ -219,7 +224,7 @@ npm run start
 In another terminal, check health:
 
 ```bash
-curl http://127.0.0.1:4000/health
+curl http://127.0.0.1:${PORT:-5015}/health
 ```
 
 Expected response:
@@ -249,7 +254,7 @@ After=network.target mysql.service
 Type=simple
 WorkingDirectory=/opt/requestops
 EnvironmentFile=/opt/requestops/.env
-ExecStart=/opt/requestops/backend/.venv/bin/python -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port 4000
+ExecStart=/opt/requestops/backend/.venv/bin/python backend/run.py
 Restart=always
 RestartSec=5
 User=www-data
@@ -300,8 +305,8 @@ server {
 
     client_max_body_size 20M;
 
-    location /api/v1/ {
-        proxy_pass http://127.0.0.1:4000/api/v1/;
+    location /srt/api/v1/ {
+        proxy_pass http://127.0.0.1:5015/api/v1/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -310,12 +315,21 @@ server {
     }
 
     location /health {
-        proxy_pass http://127.0.0.1:4000/health;
+        proxy_pass http://127.0.0.1:5015/health;
         proxy_set_header Host $host;
     }
 
-    location / {
+    location = /srt {
+        return 301 /srt/;
+    }
+
+    location /srt/ {
+        rewrite ^/srt/(.*)$ /$1 break;
         try_files $uri $uri/ /index.html;
+    }
+
+    location / {
+        return 301 /srt/;
     }
 }
 ```
@@ -341,7 +355,8 @@ After HTTPS is enabled, update `.env`:
 
 ```env
 CLIENT_ORIGIN=https://requestops.client-domain.com
-VITE_API_BASE_URL=https://requestops.client-domain.com/api/v1
+APP_PUBLIC_BASE_URL=https://requestops.client-domain.com/srt
+VITE_API_BASE_URL=
 ```
 
 Then rebuild frontend and restart backend:

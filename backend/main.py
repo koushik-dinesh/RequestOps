@@ -15,6 +15,20 @@ app = FastAPI(
     description="FastAPI backend for RequestOps internal software request management.",
 )
 
+API_PREFIX = "/api/v1"
+SRT_API_PREFIX = "/srt/api/v1"
+
+
+@app.middleware("http")
+async def rewrite_srt_api_prefix(request, call_next):
+    path = request.scope.get("path", "")
+    if path == "/srt/health":
+        request.scope["path"] = "/health"
+    elif path == SRT_API_PREFIX or path.startswith(f"{SRT_API_PREFIX}/"):
+        request.scope["path"] = f"{API_PREFIX}{path[len(SRT_API_PREFIX):]}"
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.client_origin],
@@ -48,12 +62,12 @@ def health():
         return JSONResponse(status_code=503, content={"status": "degraded", "database": "unavailable"})
 
 
-app.include_router(auth.router, prefix="/api/v1")
-app.include_router(admin.router, prefix="/api/v1")
-app.include_router(users.router, prefix="/api/v1")
-app.include_router(departments.router, prefix="/api/v1")
-app.include_router(requests.router, prefix="/api/v1")
-app.include_router(dashboard.router, prefix="/api/v1")
-app.include_router(notifications.router, prefix="/api/v1")
-app.include_router(developer_workload.router, prefix="/api/v1")
-app.include_router(daily_progress_reports.router, prefix="/api/v1")
+app.include_router(auth.router, prefix=API_PREFIX)
+app.include_router(admin.router, prefix=API_PREFIX)
+app.include_router(users.router, prefix=API_PREFIX)
+app.include_router(departments.router, prefix=API_PREFIX)
+app.include_router(requests.router, prefix=API_PREFIX)
+app.include_router(dashboard.router, prefix=API_PREFIX)
+app.include_router(notifications.router, prefix=API_PREFIX)
+app.include_router(developer_workload.router, prefix=API_PREFIX)
+app.include_router(daily_progress_reports.router, prefix=API_PREFIX)

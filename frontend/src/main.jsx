@@ -9,7 +9,7 @@ import { ThemeModeProvider } from './theme/ThemeModeProvider';
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeModeProvider>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <BrowserRouter basename="/srt" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <AuthProvider>
           <ToastProvider>
             <App />

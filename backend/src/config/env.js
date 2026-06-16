@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
-  port: Number(process.env.PORT || 4000),
+  port: Number(process.env.PORT || 5015),
   clientOrigin: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   db: {
     host: process.env.DB_HOST || '127.0.0.1',

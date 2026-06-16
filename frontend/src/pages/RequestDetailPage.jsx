@@ -71,7 +71,8 @@ const workflowSteps = [
   { key: 'CLOSED', label: 'Completed', description: 'Request completed', matches: ['CLOSED'] },
 ];
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api/v1';
+const appBasePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5015/srt/api/v1' : `${appBasePath}/api/v1`);
 
 const businessImpactCategories = [
   { value: 'PRODUCTIVITY_IMPROVEMENT', label: 'Productivity Improvement' },

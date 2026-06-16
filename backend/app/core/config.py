@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     node_env: str = Field(default="development", alias="NODE_ENV")
-    port: int = Field(default=4000, alias="PORT")
+    port: int = Field(default=5015, alias="PORT")
     client_origin: str = Field(default="http://localhost:5173", alias="CLIENT_ORIGIN")
+    app_public_base_url: str | None = Field(default=None, alias="APP_PUBLIC_BASE_URL")
 
     db_host: str = Field(default="127.0.0.1", alias="DB_HOST")
     db_port: int = Field(default=3306, alias="DB_PORT")
@@ -37,6 +38,20 @@ class Settings(BaseSettings):
     email_log_path: str = Field(default="backend/email.log", alias="EMAIL_LOG_PATH")
     email_logo_path: str = Field(default="backend/app/assets/violin-technologies-logo.png", alias="EMAIL_LOGO_PATH")
 
+    @field_validator("port", mode="before")
+    @classmethod
+    def default_empty_port(cls, value):
+        if value is None or str(value).strip() == "":
+            return 5015
+        return value
+
+    @field_validator("app_public_base_url", mode="before")
+    @classmethod
+    def normalize_public_base_url(cls, value):
+        if value is None or str(value).strip() == "":
+            return None
+        return str(value).strip().rstrip("/")
+
     @property
     def database_url(self) -> str:
         user = quote_plus(self.db_user)
@@ -45,6 +60,10 @@ class Settings(BaseSettings):
             f"mysql+pymysql://{user}:{password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}?charset=utf8mb4"
         )
+
+    @property
+    def public_app_base_url(self) -> str:
+        return (self.app_public_base_url or self.client_origin).rstrip("/")
 
     @property
     def upload_path(self) -> Path:

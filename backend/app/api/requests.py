@@ -590,7 +590,7 @@ def unique_recipient_ids(*user_ids: int | None) -> list[int]:
 
 
 def app_request_url(request_id: int) -> str:
-    return f"{settings.client_origin.rstrip('/')}/requests/{request_id}"
+    return f"{settings.public_app_base_url}/requests/{request_id}"
 
 
 def user_display_name(db: Session, user_id: int | None) -> str:
@@ -1003,7 +1003,7 @@ def create_request(payload: RequestCreatePayload, request_context: FastAPIReques
     submitted_at = created_request.get("created_at") if created_request else datetime.now()
     submission_date = submitted_at.strftime("%Y-%m-%d %H:%M") if hasattr(submitted_at, "strftime") else str(submitted_at)
     request_type_label = payload.requestType.replace("_", " ").title()
-    app_url = settings.client_origin.rstrip("/")
+    app_url = settings.public_app_base_url
     request_url = f"{app_url}/requests/{request_id}"
     email_subject = f"New Request Awaiting Your Approval – {request_number}"
     notification_message = (

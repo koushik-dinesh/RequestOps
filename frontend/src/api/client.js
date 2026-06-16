@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api/v1';
+const appBasePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+const defaultApiBaseUrl = import.meta.env.DEV ? 'http://localhost:5015/srt/api/v1' : `${appBasePath}/api/v1`;
+const baseURL = import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl;
+const loginPath = `${appBasePath}/login`;
 
 const api = axios.create({
   baseURL,
@@ -41,8 +44,8 @@ api.interceptors.response.use(
       }
       localStorage.removeItem('requestops.accessToken');
       localStorage.removeItem('requestops.refreshToken');
-      if (window.location.pathname !== '/login') {
-        window.location.assign('/login');
+      if (window.location.pathname !== loginPath) {
+        window.location.assign(loginPath);
       }
     }
     const apiError = error.response?.data?.error;

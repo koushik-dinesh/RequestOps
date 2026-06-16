@@ -86,7 +86,7 @@ def _format_status(value: str | None) -> str:
 def _default_request_email_text(*, title: str, message: str, request_row: dict | None) -> str:
     if not request_row:
         return message
-    request_url = f"{settings.client_origin.rstrip('/')}/requests/{request_row['id']}"
+    request_url = f"{settings.public_app_base_url}/requests/{request_row['id']}"
     return f"""{message}
 
 Request Information
@@ -108,7 +108,7 @@ Open RequestOps: {request_url}
 def _default_request_email_html(*, title: str, message: str, request_row: dict | None) -> str | None:
     if not request_row:
         return None
-    request_url = f"{settings.client_origin.rstrip('/')}/requests/{request_row['id']}"
+    request_url = f"{settings.public_app_base_url}/requests/{request_row['id']}"
     details = [
         ("Request ID", request_row.get("request_number")),
         ("Request Title", request_row.get("title")),

@@ -5,9 +5,9 @@
   "main": "backend/main.py",
   "scripts": {
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
-    "dev:api": "backend/.venv/bin/python -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port 4000 --reload",
+    "dev:api": "backend/.venv/bin/python backend/run.py --reload",
     "dev:web": "vite --config frontend/vite.config.js",
-    "start": "backend/.venv/bin/python -m uvicorn main:app --app-dir backend --host 0.0.0.0 --port 4000",
+    "start": "backend/.venv/bin/python backend/run.py",
     "build": "vite build --config frontend/vite.config.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:migrate": "node backend/src/db/run-sql.js backend/src/db/schema.sql",
