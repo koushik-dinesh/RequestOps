@@ -20,7 +20,7 @@ import {
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { canCreateRequest, canUseRequestScopeTabs, getDefaultRequestScope } from '../auth/permissions';
@@ -41,7 +41,7 @@ const savedViews = [
   { label: 'Work In Progress', status: 'IN_DEVELOPMENT' },
   { label: 'Review & Validation', status: 'IN_TESTING' },
   { label: 'Final Approval', status: 'UAT_PENDING' },
-  { label: 'Completed', status: 'CLOSED' },
+  { label: 'Sign-Off', status: 'CLOSED' },
 ];
 
 const requestScopes = [
@@ -69,7 +69,9 @@ const pageMetaByPreset = {
 
 export default function RequestsPage({ presetStatus = '' }) {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { user, loading: authLoading } = useAuth();
+  const initialStatus = searchParams.get('status') || presetStatus;
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -77,25 +79,33 @@ export default function RequestsPage({ presetStatus = '' }) {
   const [sort, setSort] = useState({ key: 'updated_at', direction: 'desc' });
   const [scope, setScope] = useState(() => getDefaultRequestScope(user?.roleCode));
   const [filters, setFilters] = useState({
-    status: presetStatus,
+    status: initialStatus,
     priority: '',
     type: '',
     search: '',
   });
 
+  useEffect(() => {
+    const statusFromUrl = searchParams.get('status') || presetStatus;
+    setFilters((current) => (
+      current.status === statusFromUrl ? current : { ...current, status: statusFromUrl }
+    ));
+  }, [searchParams, presetStatus]);
+
   async function load() {
     setLoading(true);
     setError('');
     try {
-      const apiFilters = {
+      const params = {
         status: filters.status,
         priority: filters.priority,
         type: filters.type,
         search: filters.search,
-        mine: scope === 'mine' ? 'true' : '',
       };
-      const query = new URLSearchParams(Object.entries(apiFilters).filter(([, value]) => value)).toString();
-      const result = await api.get(`/requests?${query}`);
+      if (scope === 'mine') {
+        params.mine = 'true';
+      }
+      const result = await api.get('/requests', { params });
       setRows(Array.isArray(result) ? result : []);
     } catch (err) {
       setRows([]);
@@ -106,11 +116,16 @@ export default function RequestsPage({ presetStatus = '' }) {
   }
 
   useEffect(() => {
+    if (authLoading) return;
     load();
-  }, [scope, filters.status, filters.priority, filters.type]);
+  }, [authLoading, scope, filters.status, filters.priority, filters.type]);
 
   useEffect(() => {
-    setScope(getDefaultRequestScope(user?.roleCode));
+    if (!user?.roleCode) return;
+    setScope((current) => {
+      const nextScope = getDefaultRequestScope(user.roleCode);
+      return current === nextScope ? current : nextScope;
+    });
   }, [user?.roleCode]);
 
   const stats = {

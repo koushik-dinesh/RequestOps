@@ -37,8 +37,9 @@ def create_token(payload: dict, secret: str, expires_in: str) -> str:
     return jwt.encode(to_encode, secret, algorithm="HS256")
 
 
-def sign_tokens(user: dict) -> dict:
-    payload = {"sub": str(user["id"]), "role": user.get("role_code"), "email": user.get("email")}
+def sign_tokens(user: dict, role_code: str | None = None) -> dict:
+    active_role = role_code or user.get("role_code")
+    payload = {"sub": str(user["id"]), "role": active_role, "email": user.get("email")}
     return {
         "accessToken": create_token(payload, settings.jwt_access_secret, settings.jwt_access_expires_in),
         "refreshToken": create_token(payload, settings.jwt_refresh_secret, settings.jwt_refresh_expires_in),

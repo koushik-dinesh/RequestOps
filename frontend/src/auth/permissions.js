@@ -20,7 +20,7 @@ export const routePermissions = {
   '/sprints': [roles.ADMIN, roles.PROJECT_MANAGER],
   '/development': [roles.IT_HEAD, roles.PROJECT_MANAGER, roles.DEVELOPER, roles.ADMIN],
   '/developer-workload': ['*'],
-  '/daily-progress-reports': [roles.IT_HEAD, roles.PROJECT_MANAGER],
+  '/daily-progress-reports': [roles.ADMIN],
   '/testing': [roles.IT_HEAD, roles.PROJECT_MANAGER, roles.QA, roles.ADMIN],
   '/uat': [roles.PROJECT_MANAGER, roles.UAT, roles.ADMIN],
   '/notifications': ['*'],

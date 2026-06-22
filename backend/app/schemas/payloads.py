@@ -33,6 +33,7 @@ class RegisterPayload(CamelModel):
 class LoginPayload(CamelModel):
     email: str = Field(min_length=3)
     password: str = Field(min_length=1)
+    roleCode: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -40,6 +41,15 @@ class LoginPayload(CamelModel):
         if "@" not in value or "." not in value.split("@")[-1]:
             raise ValueError("Invalid email address.")
         return value
+
+
+class SelectRolePayload(CamelModel):
+    roleCode: str = Field(min_length=2)
+
+
+class RoleAccessRequestPayload(CamelModel):
+    roleCode: str = Field(min_length=2)
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class RefreshPayload(CamelModel):
@@ -62,6 +72,7 @@ class PasswordPayload(CamelModel):
 class DailyProgressReportConfigPayload(CamelModel):
     isEnabled: bool = True
     reportTime: str = Field(default="19:00", pattern=r"^\d{2}:\d{2}$")
+    scheduleDays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6], min_length=1)
     recipientUserIds: list[int] = Field(default_factory=list)
     staleThresholdDays: int = Field(default=3, ge=1, le=90)
     overdueThresholdDays: int = Field(default=7, ge=1, le=365)
@@ -73,6 +84,17 @@ class DailyProgressReportConfigPayload(CamelModel):
         if int(hour) > 23 or int(minute) > 59:
             raise ValueError("Report time must use 24-hour HH:MM format.")
         return value
+
+    @field_validator("scheduleDays")
+    @classmethod
+    def valid_schedule_days(cls, value: list[int]) -> list[int]:
+        if not value:
+            raise ValueError("At least one schedule day is required.")
+        normalized = sorted(set(value))
+        for day in normalized:
+            if day < 0 or day > 6:
+                raise ValueError("Schedule days must be between 0 (Monday) and 6 (Sunday).")
+        return normalized
 
 
 class DepartmentPayload(CamelModel):

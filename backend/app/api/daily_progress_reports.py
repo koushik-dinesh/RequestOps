@@ -16,16 +16,23 @@ from app.services.daily_progress_report_service import (
     update_report_config,
 )
 from app.utils.http import ApiError, ok
+from app.utils.routing import collection_route
 
 
 router = APIRouter(prefix="/daily-progress-reports", tags=["daily-progress-reports"])
 
 
-@router.get("/")
+def _require_system_admin(user: dict = Depends(require_roles())) -> dict:
+    if user.get("role_code") != "SYSTEM_ADMIN":
+        raise ApiError(403, "Only System Admin can access daily progress reports.")
+    return user
+
+
+@collection_route(router, "get")
 def reports(
     dateFrom: str = "",
     dateTo: str = "",
-    _user: dict = Depends(require_roles("IT_HEAD", "PROJECT_MANAGER")),
+    _user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
     return ok(list_reports(db, dateFrom, dateTo))
@@ -33,7 +40,7 @@ def reports(
 
 @router.get("/config")
 def report_config(
-    _user: dict = Depends(require_roles("IT_HEAD", "PROJECT_MANAGER")),
+    _user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
     return ok({
@@ -45,17 +52,15 @@ def report_config(
 @router.put("/config")
 def save_report_config(
     payload: DailyProgressReportConfigPayload,
-    user: dict = Depends(require_roles()),
+    user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
-    if user.get("role_code") != "SYSTEM_ADMIN":
-        raise ApiError(403, "Only System Admin can update daily report configuration.")
     return ok(update_report_config(db, payload.model_dump(), user["id"]))
 
 
 @router.get("/recipient-options")
 def recipient_options(
-    _user: dict = Depends(require_roles("IT_HEAD", "PROJECT_MANAGER")),
+    _user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
     return ok(rows(
@@ -74,7 +79,7 @@ def recipient_options(
 
 @router.post("/generate")
 def generate_report_now(
-    user: dict = Depends(require_roles()),
+    user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
     report = generate_daily_report(db, date.today(), source="MANUAL", actor_user_id=user["id"], send_email_now=True)
@@ -84,7 +89,7 @@ def generate_report_now(
 @router.get("/{report_id}")
 def report_detail(
     report_id: int,
-    _user: dict = Depends(require_roles("IT_HEAD", "PROJECT_MANAGER")),
+    _user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
     report = get_report(db, report_id)
@@ -96,7 +101,7 @@ def report_detail(
 @router.post("/{report_id}/resend")
 def resend_report(
     report_id: int,
-    _user: dict = Depends(require_roles("IT_HEAD", "PROJECT_MANAGER")),
+    _user: dict = Depends(_require_system_admin),
     db: Session = Depends(get_db),
 ):
     report = get_report(db, report_id)

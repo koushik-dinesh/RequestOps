@@ -23,6 +23,8 @@ import RocketLaunchRoundedIcon from '@mui/icons-material/RocketLaunchRounded';
 import { Link as RouterLink, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { useThemeMode } from '../theme/ThemeModeProvider';
+import { roleLabels } from '../utils/constants';
+import logo from '../assets/violin-technologies-logo.png';
 
 const workflowItems = [
   { label: 'Requests', icon: <AccountTreeRoundedIcon /> },
@@ -33,7 +35,7 @@ const workflowItems = [
 ];
 
 export default function LoginPage() {
-  const { login, isAuthenticated } = useAuth();
+  const { login, completeLogin, isAuthenticated } = useAuth();
   const theme = useTheme();
   const { mode, toggleMode } = useThemeMode();
   const semantic = theme.custom.semantic;
@@ -42,6 +44,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [roleOptions, setRoleOptions] = useState(null);
+  const [pendingUser, setPendingUser] = useState(null);
+  const [submittingRole, setSubmittingRole] = useState('');
 
   if (isAuthenticated) return <Navigate to="/" replace />;
 
@@ -50,10 +55,28 @@ export default function LoginPage() {
     setError('');
     setInfo('');
     try {
-      await login(email, password);
+      const result = await login(email, password);
+      if (result?.requiresRoleSelection) {
+        setRoleOptions(result.availableRoles || []);
+        setPendingUser(result.user);
+        return;
+      }
       navigate('/');
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleRoleSelect(roleCode) {
+    setError('');
+    setSubmittingRole(roleCode);
+    try {
+      await completeLogin(email, password, roleCode);
+      navigate('/');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmittingRole('');
     }
   }
 
@@ -92,19 +115,32 @@ export default function LoginPage() {
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
               <Box
                 sx={{
-                  width: 44,
-                  height: 44,
+                  width: 52,
+                  height: 52,
                   borderRadius: 2.75,
-                  display: 'grid',
-                  placeItems: 'center',
-                  color: '#FFFFFF',
-                  fontWeight: 900,
-                  letterSpacing: '-0.04em',
-                  background: 'linear-gradient(135deg, #07111F, #1D4ED8)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  bgcolor: '#FFFFFF',
+                  p: 0.5,
                   boxShadow: '0 16px 36px rgba(29, 78, 216, 0.22)',
+                  overflow: 'hidden',
                 }}
               >
-                V
+                <Box
+                  component="img"
+                  src={logo}
+                  alt="Violin Technologies"
+                  sx={{
+                    display: 'block',
+                    width: '108%',
+                    height: '108%',
+                    objectFit: 'contain',
+                    objectPosition: 'center 58%',
+                    transform: 'translateY(4px)',
+                  }}
+                />
               </Box>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="h6" sx={{ lineHeight: 1 }}>RequestOps</Typography>
@@ -125,10 +161,37 @@ export default function LoginPage() {
           </Stack>
 
           <Box sx={{ mb: 4 }}>
-            <Typography variant="h4">Welcome back</Typography>
-            <Typography color="text.secondary" sx={{ mt: 1 }}>Sign in to continue.</Typography>
+            <Typography variant="h4">{roleOptions ? 'Choose your profile' : 'Welcome back'}</Typography>
+            <Typography color="text.secondary" sx={{ mt: 1 }}>
+              {roleOptions
+                ? `Select how you want to enter RequestOps${pendingUser?.fullName ? ` as ${pendingUser.fullName}` : ''}.`
+                : 'Sign in to continue.'}
+            </Typography>
           </Box>
 
+          {roleOptions ? (
+            <Stack spacing={1.25}>
+              {error && <Alert severity="error">{error}</Alert>}
+              {roleOptions.map((role) => (
+                <Button
+                  key={role.code}
+                  variant="outlined"
+                  size="large"
+                  disabled={Boolean(submittingRole)}
+                  onClick={() => handleRoleSelect(role.code)}
+                  sx={{ justifyContent: 'space-between', minHeight: 58, borderRadius: 2.5, px: 2 }}
+                >
+                  <Box sx={{ textAlign: 'left' }}>
+                    <Typography fontWeight={800}>{roleLabels[role.code] || role.name}</Typography>
+                  </Box>
+                  <ArrowForwardRoundedIcon />
+                </Button>
+              ))}
+              <Button variant="text" onClick={() => { setRoleOptions(null); setPendingUser(null); }}>
+                Back to sign in
+              </Button>
+            </Stack>
+          ) : (
           <Stack component="form" spacing={2.25} onSubmit={handleSubmit}>
             {error && <Alert severity="error">{error}</Alert>}
             {info && <Alert severity="info">{info}</Alert>}
@@ -173,6 +236,7 @@ export default function LoginPage() {
               Sign in
             </Button>
           </Stack>
+          )}
 
         </Box>
       </Box>

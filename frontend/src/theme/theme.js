@@ -183,6 +183,22 @@ export function createRequestOpsTheme(mode = 'light') {
         },
         contained: {
           backgroundImage: 'linear-gradient(135deg, #1D4ED8, #2563EB)',
+          color: '#FFFFFF',
+          '&:hover': {
+            color: '#FFFFFF',
+            backgroundImage: 'linear-gradient(135deg, #1D4ED8, #2563EB)',
+          },
+          '&:disabled': {
+            color: alpha('#FFFFFF', 0.72),
+          },
+        },
+        containedSecondary: {
+          backgroundImage: 'linear-gradient(135deg, #0F766E, #14B8A6)',
+          color: '#FFFFFF',
+          '&:hover': {
+            color: '#FFFFFF',
+            backgroundImage: 'linear-gradient(135deg, #0F766E, #14B8A6)',
+          },
         },
         outlined: {
           borderColor: '#D7DEE8',

@@ -82,6 +82,7 @@ from app.repositories.requirements_repository import (
 from app.services.activity_service import audit, notify
 from app.services.upload_service import save_upload
 from app.utils.http import ApiError, ok
+from app.utils.routing import collection_route
 from app.workflows.request_workflow import get_request_by_id, transition_request
 
 
@@ -864,7 +865,7 @@ def annual_roi_summary(roi: dict) -> str:
     return "Not specified"
 
 
-@router.get("/")
+@collection_route(router, "get")
 def list_requests(
     status: str = "",
     priority: str = "",
@@ -890,7 +891,9 @@ def list_requests(
         filters.append("r.requester_user_id = :userId")
     elif not is_admin_or_it(user):
         if role == "DEPARTMENT_HEAD":
-            filters.append("(r.department_head_user_id = :userId OR r.requester_department_id = :userDepartmentId)")
+            filters.append("(r.department_head_user_id = :userId OR d.department_head_user_id = :userId OR r.requester_department_id = :userDepartmentId)")
+        elif role == "EMPLOYEE":
+            filters.append("r.requester_user_id = :userId")
         elif role == "PROJECT_MANAGER":
             filters.append("r.project_manager_user_id = :userId")
         elif role == "DEVELOPER":
@@ -899,8 +902,6 @@ def list_requests(
             filters.append("a.qa_user_id = :userId")
         elif role == "UAT_APPROVER":
             filters.append("(r.current_assignee_user_id = :userId OR r.status = 'UAT_PENDING')")
-        else:
-            filters.append("r.requester_department_id = :userDepartmentId")
     request_rows = rows(db, f"""
         SELECT r.*, requester.full_name AS requester_name, d.name AS department_name,
                dh.full_name AS department_head_name,
@@ -934,7 +935,7 @@ def list_requests(
     return ok([request_with_roi_calculation(item) for item in request_rows])
 
 
-@router.post("/")
+@collection_route(router, "post")
 def create_request(payload: RequestCreatePayload, request_context: FastAPIRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     if not user.get("department_id"):
         raise ApiError(400, "Your profile must have a department before creating requests.")

@@ -13,6 +13,7 @@ app = FastAPI(
     title="RequestOps API",
     version="1.0.0",
     description="FastAPI backend for RequestOps internal software request management.",
+    redirect_slashes=False,
 )
 
 API_PREFIX = "/api/v1"

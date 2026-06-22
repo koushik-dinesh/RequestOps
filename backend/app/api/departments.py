@@ -6,12 +6,13 @@ from app.middleware.auth import get_current_user, require_roles
 from app.schemas.payloads import DepartmentHeadPayload, DepartmentPayload
 from app.services.activity_service import audit
 from app.utils.http import ApiError, ok
+from app.utils.routing import collection_route
 
 
 router = APIRouter(prefix="/departments", tags=["departments"])
 
 
-@router.get("/")
+@collection_route(router, "get")
 def list_departments(status: str = "", search: str = "", db: Session = Depends(get_db)):
     return ok(rows(db, """
         SELECT d.id, d.name, d.code, d.description, d.status, d.department_head_user_id,
@@ -43,7 +44,7 @@ def directory(db: Session = Depends(get_db)):
     """))
 
 
-@router.post("/")
+@collection_route(router, "post")
 def create_department(payload: DepartmentPayload, request: Request, user: dict = Depends(require_roles("SYSTEM_ADMIN")), db: Session = Depends(get_db)):
     if not payload.name or not payload.code:
         raise ApiError(400, "Validation failed.")

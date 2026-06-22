@@ -15,8 +15,14 @@ import {
   Toolbar,
   Typography,
   Button,
+  Chip,
   Tooltip,
   useMediaQuery,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useEffect, useState } from 'react';
@@ -44,15 +50,18 @@ import {
   LogOut,
   Plus,
   ShieldCheck,
+  UserPlus,
   UsersRound,
 } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { canAccess, canCreateRequest, routePermissions } from '../auth/permissions';
-import { missingReportingAuthorityText, roleLabels } from '../utils/constants';
+import { roleLabels } from '../utils/constants';
 import api from '../api/client';
 import { useThemeMode } from '../theme/ThemeModeProvider';
 import { formatRelativeTime, getNotificationMeta } from '../utils/notifications';
+import { useToast } from '../components/ToastProvider';
+import logo from '../assets/violin-technologies-logo.png';
 
 const expandedWidth = 244;
 const collapsedWidth = 64;
@@ -71,7 +80,6 @@ const navGroups = [
     label: 'Operations',
     items: [
       { label: 'Developer Workload', path: '/developer-workload', icon: Gauge, route: '/developer-workload' },
-      { label: 'Daily Progress Reports', path: '/daily-progress-reports', icon: ClipboardList, route: '/daily-progress-reports' },
     ],
   },
   {
@@ -87,6 +95,7 @@ const navGroups = [
     items: [
       { label: 'Notifications', path: '/notifications', icon: Bell, route: '/notifications' },
       { label: 'User Manual', path: '/manual', icon: BookOpen, route: '/manual' },
+      { label: 'Daily Progress Reports', path: '/daily-progress-reports', icon: ClipboardList, route: '/daily-progress-reports' },
       { label: 'Admin', path: '/admin', icon: ShieldCheck, route: '/admin' },
     ],
   },
@@ -101,7 +110,8 @@ function getRoleAwareNavLabel(item, roleCode) {
 }
 
 export default function AppLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, switchRole, requestRoleAccess } = useAuth();
+  const { showToast } = useToast();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { mode, toggleMode } = useThemeMode();
@@ -113,6 +123,10 @@ export default function AppLayout() {
   const [notifications, setNotifications] = useState([]);
   const [notificationAnchor, setNotificationAnchor] = useState(null);
   const [profileAnchor, setProfileAnchor] = useState(null);
+  const [roleRequestOpen, setRoleRequestOpen] = useState(false);
+  const [roleRequestCode, setRoleRequestCode] = useState('');
+  const [roleRequestReason, setRoleRequestReason] = useState('');
+  const [switchingRole, setSwitchingRole] = useState('');
   const visibleGroups = navGroups
     .map((group) => ({
       ...group,
@@ -135,10 +149,12 @@ export default function AppLayout() {
   const sidebarMuted = theme.palette.mode === 'dark' ? '#94A3B8' : '#64748B';
   const sidebarActiveBg = theme.palette.mode === 'dark' ? 'rgba(37,99,235,0.14)' : '#EAF1FF';
   const sidebarHoverBg = theme.palette.mode === 'dark' ? 'rgba(148,163,184,0.10)' : '#EEF2F7';
-  const showReportingOwner = user?.roleCode && user.roleCode !== 'SYSTEM_ADMIN';
-  const reportingOwner = user?.departmentHeadId === user?.id
-    ? 'You are the department head'
-    : user?.departmentHeadName || missingReportingAuthorityText;
+  const availableRoles = user?.availableRoles || [];
+  const pendingRoleRequests = user?.pendingRoleRequests || [];
+  const hasMultipleRoles = availableRoles.length > 1;
+  const requestableRoleCodes = Object.keys(roleLabels).filter(
+    (code) => !availableRoles.some((role) => role.code === code) && !pendingRoleRequests.includes(code),
+  );
 
   useEffect(() => {
     api.get('/notifications').then(setNotifications).catch(() => setNotifications([]));
@@ -159,6 +175,40 @@ export default function AppLayout() {
     navigate(notification.request_id ? `/requests/${notification.request_id}` : '/notifications');
   }
 
+  async function handleSwitchRole(roleCode) {
+    if (roleCode === user?.roleCode) {
+      setProfileAnchor(null);
+      return;
+    }
+    setSwitchingRole(roleCode);
+    try {
+      await switchRole(roleCode);
+      setProfileAnchor(null);
+      showToast(`Switched to ${roleLabels[roleCode] || roleCode}.`);
+      navigate('/');
+    } catch (err) {
+      showToast(err.message || 'Unable to switch role.', { severity: 'error' });
+    } finally {
+      setSwitchingRole('');
+    }
+  }
+
+  async function submitRoleAccessRequest() {
+    if (!roleRequestCode.trim()) {
+      showToast('Choose a role to request.', { severity: 'warning' });
+      return;
+    }
+    try {
+      await requestRoleAccess(roleRequestCode, roleRequestReason);
+      setRoleRequestOpen(false);
+      setRoleRequestCode('');
+      setRoleRequestReason('');
+      showToast('Role access request submitted to System Admin.');
+    } catch (err) {
+      showToast(err.message || 'Unable to submit role access request.', { severity: 'error' });
+    }
+  }
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100dvh', width: '100%', overflowX: 'hidden' }}>
       <AppBar
@@ -174,16 +224,47 @@ export default function AppLayout() {
         }}
       >
         <Toolbar sx={{ minHeight: 64, gap: { xs: 1, sm: 1.5, md: 2 }, px: { xs: 1.5, sm: 2, md: 3 } }}>
-          <IconButton
-            onClick={() => {
-              if (isMobile) setMobileOpen(true);
-              else setCollapsed((value) => !value);
-            }}
-            sx={{ border: `1px solid ${semantic.borderSoft}`, bgcolor: semantic.paper, flexShrink: 0 }}
-            aria-label={isMobile ? 'Open navigation' : 'Toggle navigation'}
-          >
-            {effectiveCollapsed ? <MenuIcon /> : <MenuOpenIcon />}
-          </IconButton>
+          <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', minWidth: 0, flexShrink: 0 }}>
+            <Box
+              sx={{
+                width: { xs: 40, sm: 48 },
+                height: { xs: 40, sm: 48 },
+                borderRadius: 1.75,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                bgcolor: '#FFFFFF',
+                p: 0.45,
+                boxShadow: '0 2px 8px rgba(15,23,42,0.08)',
+                overflow: 'hidden',
+              }}
+            >
+              <Box
+                component="img"
+                src={logo}
+                alt="Violin Technologies"
+                sx={{
+                  display: 'block',
+                  width: '108%',
+                  height: '108%',
+                  objectFit: 'contain',
+                  objectPosition: 'center 62%',
+                  transform: 'translateY(3px)',
+                }}
+              />
+            </Box>
+            <IconButton
+              onClick={() => {
+                if (isMobile) setMobileOpen(true);
+                else setCollapsed((value) => !value);
+              }}
+              sx={{ border: `1px solid ${semantic.borderSoft}`, bgcolor: semantic.paper, flexShrink: 0 }}
+              aria-label={isMobile ? 'Open navigation' : 'Toggle navigation'}
+            >
+              {effectiveCollapsed ? <MenuIcon /> : <MenuOpenIcon />}
+            </IconButton>
+          </Stack>
           <Box
             sx={{
               flex: 1,
@@ -215,6 +296,34 @@ export default function AppLayout() {
           <IconButton onClick={toggleMode} sx={{ border: `1px solid ${semantic.borderSoft}`, bgcolor: semantic.paper }}>
             {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
           </IconButton>
+          <Stack
+            direction="row"
+            spacing={1}
+            onClick={(event) => setProfileAnchor(event.currentTarget)}
+            sx={{
+              alignItems: 'center',
+              cursor: 'pointer',
+              px: 1,
+              py: 0.5,
+              borderRadius: 999,
+              border: `1px solid ${semantic.borderSoft}`,
+              bgcolor: semantic.paper,
+              minWidth: 0,
+              maxWidth: { xs: 160, sm: 240 },
+            }}
+          >
+            <Avatar sx={{ width: 30, height: 30, bgcolor: '#1D4ED8', fontSize: 12, fontWeight: 800 }}>
+              {user?.fullName?.[0]}
+            </Avatar>
+            <Box sx={{ minWidth: 0, display: { xs: 'none', sm: 'block' } }}>
+              <Typography sx={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.2 }} noWrap>
+                {user?.fullName}
+              </Typography>
+              <Typography sx={{ fontSize: 11, color: 'text.secondary', lineHeight: 1.2 }} noWrap>
+                {roleLabels[user?.roleCode] || user?.roleCode}
+              </Typography>
+            </Box>
+          </Stack>
         </Toolbar>
       </AppBar>
 
@@ -252,21 +361,18 @@ export default function AppLayout() {
             }}
           >
             <Box
+              component="img"
+              src={logo}
+              alt="Violin Technologies"
               sx={{
                 width: 28,
                 height: 28,
                 borderRadius: 1.5,
-                display: 'grid',
-                placeItems: 'center',
-                color: '#FFFFFF',
-                fontSize: 13,
-                fontWeight: 900,
-                letterSpacing: '-0.04em',
-                bgcolor: '#1D4ED8',
+                objectFit: 'contain',
+                bgcolor: '#FFFFFF',
+                p: 0.25,
               }}
-            >
-              V
-            </Box>
+            />
             {!effectiveCollapsed && (
               <Box sx={{ minWidth: 0 }}>
                 <Typography sx={{ color: theme.palette.text.primary, fontSize: 14, fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.15 }}>
@@ -342,37 +448,6 @@ export default function AppLayout() {
                 <LogOut size={sidebarIconSize} strokeWidth={2} />
                 {!effectiveCollapsed && <Typography sx={{ fontSize: 13, fontWeight: 600 }}>Logout</Typography>}
               </ListItemButton>
-            </Stack>
-
-            <Stack
-              direction="row"
-              spacing={1}
-              onClick={(event) => setProfileAnchor(event.currentTarget)}
-              sx={{
-                mt: 0.75,
-                px: effectiveCollapsed ? 0 : 0.75,
-                py: 0.65,
-                minHeight: 44,
-                borderRadius: 1.5,
-                cursor: 'pointer',
-                alignItems: 'center',
-                justifyContent: effectiveCollapsed ? 'center' : 'flex-start',
-                '&:hover': { bgcolor: sidebarHoverBg },
-              }}
-            >
-              <Avatar sx={{ width: 28, height: 28, bgcolor: '#1D4ED8', fontSize: 12, fontWeight: 800 }}>
-                {user?.fullName?.[0]}
-              </Avatar>
-              {!effectiveCollapsed && (
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography sx={{ color: theme.palette.text.primary, fontSize: 12.5, fontWeight: 700, lineHeight: 1.2 }} noWrap>
-                    {user?.fullName}
-                  </Typography>
-                  <Typography sx={{ color: sidebarMuted, fontSize: 11, lineHeight: 1.25 }} noWrap>
-                    {roleLabels[user?.roleCode] || user?.roleCode}
-                  </Typography>
-                </Box>
-              )}
             </Stack>
           </Box>
         </Box>
@@ -458,25 +533,241 @@ export default function AppLayout() {
         anchorEl={profileAnchor}
         open={Boolean(profileAnchor)}
         onClose={() => setProfileAnchor(null)}
-        PaperProps={{ sx: { width: { xs: 'calc(100vw - 24px)', sm: 320 }, maxWidth: 'calc(100vw - 24px)', borderRadius: 3, mt: 1 } }}
+        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+        MenuListProps={{ sx: { p: 0 } }}
+        PaperProps={{
+          elevation: 0,
+          sx: {
+            width: { xs: 'min(calc(100vw - 24px), 320px)', sm: 320 },
+            maxWidth: 340,
+            borderRadius: '18px',
+            mt: 1.25,
+            overflow: 'hidden',
+            border: (t) => `1px solid ${t.palette.mode === 'dark' ? 'rgba(148,163,184,0.14)' : 'rgba(15,23,42,0.08)'}`,
+            bgcolor: (t) => (t.palette.mode === 'dark' ? 'rgba(17,24,39,0.94)' : 'rgba(255,255,255,0.94)'),
+            backdropFilter: 'blur(20px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(160%)',
+            boxShadow: (t) => (t.palette.mode === 'dark'
+              ? '0 18px 48px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04)'
+              : '0 18px 48px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.85)'),
+            backgroundImage: 'none',
+          },
+        }}
       >
-        <Box px={2} py={1.5}>
-          <Typography variant="subtitle2" sx={{ overflowWrap: 'anywhere' }}>{user?.fullName}</Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{user?.email}</Typography>
-          {showReportingOwner && (
-            <Box sx={{ mt: 1, p: 1, borderRadius: 1.5, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={800}>Reports to</Typography>
-              <Typography variant="body2" fontWeight={800} sx={{ overflowWrap: 'anywhere' }}>{reportingOwner}</Typography>
-              {user?.departmentHeadEmail && user?.departmentHeadId !== user?.id && (
-                <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{user.departmentHeadEmail}</Typography>
-              )}
-            </Box>
-          )}
-        </Box>
-        <Divider />
-        <MenuItem onClick={() => navigate('/')}>Dashboard</MenuItem>
-        <MenuItem onClick={logout}>Logout</MenuItem>
+        <ProfileDropdown
+          user={user}
+          availableRoles={availableRoles}
+          hasMultipleRoles={hasMultipleRoles}
+          switchingRole={switchingRole}
+          onSwitchRole={handleSwitchRole}
+          onRoleRequest={() => { setProfileAnchor(null); setRoleRequestOpen(true); }}
+          onLogout={logout}
+        />
       </Menu>
+
+      <Dialog open={roleRequestOpen} onClose={() => setRoleRequestOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>New Role Access Request</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 0.5 }}>
+            <TextField
+              select
+              label="Requested role"
+              value={roleRequestCode}
+              onChange={(event) => setRoleRequestCode(event.target.value)}
+              fullWidth
+              helperText={
+                requestableRoleCodes.length === 0
+                  ? 'You already hold all assignable roles or have pending requests for the remaining roles.'
+                  : pendingRoleRequests.length > 0
+                    ? 'Roles with a pending request are hidden until they are reviewed.'
+                    : ''
+              }
+            >
+              {requestableRoleCodes.map((code) => (
+                <MenuItem key={code} value={code}>{roleLabels[code]}</MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="Reason"
+              value={roleRequestReason}
+              onChange={(event) => setRoleRequestReason(event.target.value)}
+              multiline
+              minRows={3}
+              fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRoleRequestOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={submitRoleAccessRequest}>Submit Request</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
+function ProfileDropdown({
+  user,
+  availableRoles,
+  hasMultipleRoles,
+  switchingRole,
+  onSwitchRole,
+  onRoleRequest,
+  onLogout,
+}) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  const roleLabel = roleLabels[user?.roleCode] || user?.roleCode;
+
+  return (
+    <Box>
+      <Stack direction="row" spacing={1.25} sx={{ px: 1.5, py: 1.25, alignItems: 'center' }}>
+        <Avatar
+          sx={{
+            width: 36,
+            height: 36,
+            bgcolor: '#1D4ED8',
+            fontSize: 13,
+            fontWeight: 800,
+            boxShadow: '0 0 0 2px rgba(37,99,235,0.18)',
+          }}
+        >
+          {user?.fullName?.[0]}
+        </Avatar>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography sx={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.25, letterSpacing: '-0.01em' }} noWrap>
+            {user?.fullName}
+          </Typography>
+          <Typography sx={{ fontSize: 11.5, color: 'text.secondary', lineHeight: 1.3, mt: 0.15 }} noWrap>
+            {user?.email}
+          </Typography>
+          <Chip
+            size="small"
+            label={roleLabel}
+            sx={{
+              mt: 0.55,
+              height: 20,
+              maxWidth: '100%',
+              fontSize: 10.5,
+              fontWeight: 700,
+              letterSpacing: '0.01em',
+              borderRadius: 999,
+              color: isDark ? '#93C5FD' : '#1D4ED8',
+              bgcolor: isDark ? 'rgba(37,99,235,0.16)' : 'rgba(37,99,235,0.08)',
+              border: `1px solid ${isDark ? 'rgba(96,165,250,0.22)' : 'rgba(37,99,235,0.14)'}`,
+              '& .MuiChip-label': { px: 0.9 },
+            }}
+          />
+        </Box>
+      </Stack>
+
+      <Divider sx={{ borderColor: isDark ? 'rgba(148,163,184,0.12)' : 'rgba(15,23,42,0.06)' }} />
+
+      {hasMultipleRoles && (
+        <>
+          <Typography
+            sx={{
+              px: 1.5,
+              pt: 1,
+              pb: 0.35,
+              fontSize: 10,
+              fontWeight: 800,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'text.secondary',
+            }}
+          >
+            Switch account
+          </Typography>
+          <Stack sx={{ px: 0.75, pb: 0.5 }}>
+            {availableRoles.map((role) => (
+              <ProfileMenuItem
+                key={role.code}
+                icon={SyncAltOutlinedIcon}
+                label={roleLabels[role.code] || role.name}
+                selected={role.code === user?.roleCode}
+                disabled={switchingRole === role.code}
+                onClick={() => onSwitchRole(role.code)}
+              />
+            ))}
+          </Stack>
+          <Divider sx={{ borderColor: isDark ? 'rgba(148,163,184,0.12)' : 'rgba(15,23,42,0.06)' }} />
+        </>
+      )}
+
+      <Stack sx={{ px: 0.75, py: 0.75 }}>
+        <ProfileMenuItem icon={UserPlus} label="New Role Access Request" onClick={onRoleRequest} />
+        <ProfileMenuItem icon={LogOut} label="Logout" onClick={onLogout} tone="danger" />
+      </Stack>
+    </Box>
+  );
+}
+
+function ProfileMenuItem({
+  icon: Icon,
+  label,
+  onClick,
+  selected = false,
+  disabled = false,
+  tone = 'default',
+}) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  const isDanger = tone === 'danger';
+  const isMuiIcon = typeof Icon === 'function' && Icon.muiName;
+
+  return (
+    <Box
+      component="button"
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      sx={{
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.1,
+        px: 1.1,
+        py: 0.8,
+        minHeight: 36,
+        border: 'none',
+        borderRadius: '10px',
+        bgcolor: selected
+          ? (isDark ? 'rgba(37,99,235,0.14)' : 'rgba(37,99,235,0.08)')
+          : 'transparent',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        textAlign: 'left',
+        opacity: disabled ? 0.55 : 1,
+        color: isDanger ? '#DC2626' : 'text.primary',
+        transition: 'background-color 140ms ease, transform 140ms ease, color 140ms ease',
+        '&:hover': disabled ? {} : {
+          bgcolor: isDanger
+            ? (isDark ? 'rgba(220,38,38,0.14)' : 'rgba(220,38,38,0.06)')
+            : (isDark ? 'rgba(148,163,184,0.10)' : 'rgba(15,23,42,0.04)'),
+          transform: 'translateX(3px)',
+        },
+      }}
+    >
+      <Box
+        sx={{
+          width: 28,
+          height: 28,
+          borderRadius: 1.25,
+          display: 'grid',
+          placeItems: 'center',
+          flexShrink: 0,
+          color: isDanger ? '#DC2626' : (selected ? '#2563EB' : 'text.secondary'),
+          bgcolor: isDanger
+            ? (isDark ? 'rgba(220,38,38,0.12)' : 'rgba(220,38,38,0.06)')
+            : (isDark ? 'rgba(148,163,184,0.10)' : 'rgba(15,23,42,0.04)'),
+        }}
+      >
+        {isMuiIcon ? <Icon sx={{ fontSize: 15 }} /> : <Icon size={15} strokeWidth={2} />}
+      </Box>
+      <Typography sx={{ fontSize: 13, fontWeight: selected ? 700 : 600, lineHeight: 1.2 }}>
+        {label}
+      </Typography>
     </Box>
   );
 }

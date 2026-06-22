@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db, one
 from app.core.security import decode_access_token
+from app.services.user_role_service import get_user_roles, user_has_role
 from app.utils.http import ApiError
 
 
@@ -41,6 +42,13 @@ def get_current_user(
     user = one(db, USER_SELECT, {"id": payload.get("sub")})
     if not user or user.get("status") != "ACTIVE":
         raise ApiError(401, "Account is not active.")
+    active_role_code = payload.get("role")
+    if active_role_code and user_has_role(db, user["id"], active_role_code):
+        active_role = next((role for role in get_user_roles(db, user["id"]) if role["code"] == active_role_code), None)
+        if active_role:
+            user["role_code"] = active_role["code"]
+            user["role_name"] = active_role["name"]
+    user["available_roles"] = get_user_roles(db, user["id"])
     request.state.user = user
     return user
 

@@ -655,6 +655,7 @@ CREATE TABLE IF NOT EXISTS daily_progress_report_config (
   id TINYINT UNSIGNED PRIMARY KEY DEFAULT 1,
   is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   report_time TIME NOT NULL DEFAULT '19:00:00',
+  schedule_days JSON NULL,
   recipient_user_ids JSON NULL,
   stale_threshold_days INT UNSIGNED NOT NULL DEFAULT 3,
   overdue_threshold_days INT UNSIGNED NOT NULL DEFAULT 7,

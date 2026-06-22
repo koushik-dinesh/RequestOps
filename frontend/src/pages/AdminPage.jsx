@@ -29,6 +29,7 @@ import {
   TableSortLabel,
   Tabs,
   TextField,
+  Tooltip,
   Typography,
   useMediaQuery,
   useTheme,
@@ -53,11 +54,14 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import BusinessOutlinedIcon from '@mui/icons-material/BusinessOutlined';
 import ToggleOffOutlinedIcon from '@mui/icons-material/ToggleOffOutlined';
 import ToggleOnOutlinedIcon from '@mui/icons-material/ToggleOnOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import BadgeOutlinedIcon from '@mui/icons-material/BadgeOutlined';
 import api from '../api/client';
+import { useAuth } from '../auth/AuthProvider';
 import StatusBadge from '../components/StatusBadge';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
-import { missingReportingAuthorityText } from '../utils/constants';
+import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
 
 const lifecycleRoleCodes = ['SYSTEM_ADMIN', 'DEPARTMENT_HEAD', 'EMPLOYEE'];
 const emptyResponsibilities = { total: 0, items: [] };
@@ -116,7 +120,9 @@ function useAdminColors() {
 }
 
 export default function AdminPage() {
+  const { user: currentUser } = useAuth();
   const [registrations, setRegistrations] = useState([]);
+  const [roleAccessRequests, setRoleAccessRequests] = useState([]);
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -137,13 +143,15 @@ export default function AdminPage() {
 
   async function load() {
     setLoading(true);
-    const [registrationRows, userRows, departmentRows, roleRows] = await Promise.all([
+    const [registrationRows, roleAccessRows, userRows, departmentRows, roleRows] = await Promise.all([
       api.get('/admin/registrations?status=PENDING_APPROVAL'),
+      api.get('/admin/role-access-requests?status=PENDING'),
       api.get('/users'),
       api.get('/departments'),
       api.get('/users/roles'),
     ]);
     setRegistrations(registrationRows);
+    setRoleAccessRequests(roleAccessRows);
     setUsers(userRows);
     setDepartments(departmentRows);
     setRoles(roleRows);
@@ -167,6 +175,13 @@ export default function AdminPage() {
   const developers = useMemo(() => activeUsers.filter((item) => item.role_code === 'DEVELOPER'), [activeUsers]);
   const qaUsers = useMemo(() => activeUsers.filter((item) => item.role_code === 'QA'), [activeUsers]);
   const itHeads = useMemo(() => activeUsers.filter((item) => ['IT_HEAD', 'SYSTEM_ADMIN'].includes(item.role_code)), [activeUsers]);
+  const approvalQueue = useMemo(() => {
+    const registrationItems = registrations.map((row) => ({ ...row, queueType: 'REGISTRATION', sortDate: row.created_at }));
+    const roleItems = roleAccessRequests.map((row) => ({ ...row, queueType: 'ROLE_ACCESS', sortDate: row.created_at }));
+    return [...registrationItems, ...roleItems].sort(
+      (a, b) => new Date(b.sortDate || 0).getTime() - new Date(a.sortDate || 0).getTime(),
+    );
+  }, [registrations, roleAccessRequests]);
 
   async function approve(registrationId) {
     const payload = approval[registrationId];
@@ -192,6 +207,28 @@ export default function AdminPage() {
       await load();
     } catch (err) {
       setError(err.message || 'Unable to reject registration.');
+    }
+  }
+
+  async function approveRoleAccess(requestId) {
+    try {
+      setError('');
+      await api.post(`/admin/role-access-requests/${requestId}/approve`);
+      setMessage('Additional role access approved.');
+      await load();
+    } catch (err) {
+      setError(err.message || 'Unable to approve role access request.');
+    }
+  }
+
+  async function rejectRoleAccess(requestId) {
+    try {
+      setError('');
+      await api.post(`/admin/role-access-requests/${requestId}/reject`, { reason: 'Rejected by admin during review.' });
+      setMessage('Additional role access request rejected.');
+      await load();
+    } catch (err) {
+      setError(err.message || 'Unable to reject role access request.');
     }
   }
 
@@ -385,21 +422,23 @@ export default function AdminPage() {
 
         <AdminMetricGrid
           metrics={[
-            { label: 'Pending Registrations', value: registrations.length, icon: <HowToRegIcon /> },
+            { label: 'Pending Approvals', value: approvalQueue.length, icon: <HowToRegIcon /> },
             { label: 'Active Users', value: activeUsers.length, icon: <GroupIcon /> },
             { label: 'Departments', value: departments.length, icon: <ApartmentIcon /> },
             { label: 'Roles', value: roles.length, icon: <AdminPanelSettingsIcon /> },
           ]}
         />
 
-        <PendingRegistrationsPanel
-          rows={registrations}
+        <PendingApprovalsPanel
+          rows={approvalQueue}
           departments={departments}
           roles={roles}
           approval={approval}
           setApprovalField={setApprovalField}
-          onApprove={approve}
-          onReject={reject}
+          onApproveRegistration={approve}
+          onRejectRegistration={reject}
+          onApproveRoleAccess={approveRoleAccess}
+          onRejectRoleAccess={rejectRoleAccess}
         />
 
         <EmployeeManagementPanel
@@ -506,17 +545,25 @@ function AdminMetricTile({ label, value, icon }) {
   );
 }
 
-function PendingRegistrationsPanel({ rows, departments, roles, approval, setApprovalField, onApprove, onReject }) {
+function PendingApprovalsPanel({
+  rows,
+  departments,
+  roles,
+  approval,
+  setApprovalField,
+  onApproveRegistration,
+  onRejectRegistration,
+  onApproveRoleAccess,
+  onRejectRoleAccess,
+}) {
   const colors = useAdminColors();
   return (
-    <AdminPanel
-      title="Pending Registrations"
-    >
+    <AdminPanel title="Pending Approvals">
       <TableContainer sx={{ overflowX: 'auto' }}>
-        <Table stickyHeader sx={{ minWidth: 980 }}>
-          <TableHead>
+        <Table stickyHeader sx={{ minWidth: 1180 }}>
+            <TableHead>
             <TableRow>
-              {['Applicant', 'Email', 'Requested Department', 'Confirm Department', 'Assign Role', 'Actions'].map((label) => (
+              {['Type', 'Applicant', 'Email', 'Role Context', 'Request Date', 'Status', 'Assignment', 'Justification', 'Actions'].map((label) => (
                 <TableCell key={label}>{label}</TableCell>
               ))}
             </TableRow>
@@ -524,35 +571,142 @@ function PendingRegistrationsPanel({ rows, departments, roles, approval, setAppr
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} sx={{ border: 0 }}>
-                  <CompactEmptyState title="No Pending Registrations" message="All registration requests have been processed." />
+                <TableCell colSpan={9} sx={{ border: 0 }}>
+                  <CompactEmptyState title="No Pending Approvals" message="All registration and additional role access requests have been processed." />
                 </TableCell>
               </TableRow>
-            ) : rows.map((row) => (
-              <TableRow key={row.id} hover sx={{ height: 68 }}>
-                <TableCell sx={{ minWidth: 220 }}>
-                  <EmployeeMiniIdentity name={row.full_name} caption={row.employee_id} />
-                </TableCell>
-                <TableCell sx={{ color: colors.muted, minWidth: 220 }}>{row.email}</TableCell>
-                <TableCell>{row.requested_department_name}</TableCell>
-                <TableCell sx={{ minWidth: 190 }}>
-                  <TextField select value={approval[row.id]?.departmentId || ''} onChange={(e) => setApprovalField(row.id, 'departmentId', e.target.value)} fullWidth>
-                    {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
-                  </TextField>
-                </TableCell>
-                <TableCell sx={{ minWidth: 190 }}>
-                  <TextField select value={approval[row.id]?.roleId || ''} onChange={(e) => setApprovalField(row.id, 'roleId', e.target.value)} fullWidth>
-                    {roles.map((role) => <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>)}
-                  </TextField>
-                </TableCell>
-                <TableCell sx={{ minWidth: 180 }}>
-                  <Stack direction="row" spacing={1} sx={{ '& .MuiButton-root': { whiteSpace: 'nowrap', borderRadius: adminRadius.control } }}>
-                    <Button size="small" variant="contained" onClick={() => onApprove(row.id)}>Approve</Button>
-                    <Button size="small" color="error" variant="outlined" onClick={() => onReject(row.id)}>Reject</Button>
-                  </Stack>
-                </TableCell>
-              </TableRow>
-            ))}
+            ) : rows.map((row) => {
+              const isRoleAccess = row.queueType === 'ROLE_ACCESS';
+              const existingRoles = String(row.existing_role_codes || '')
+                .split(',')
+                .map((code) => code.trim())
+                .filter(Boolean);
+              const justification = (row.reason || '').trim();
+
+              return (
+                <TableRow key={`${row.queueType}-${row.id}`} hover sx={{ height: 68 }}>
+                  <TableCell sx={{ minWidth: 170 }}>
+                    <Chip
+                      size="small"
+                      icon={isRoleAccess ? <BadgeOutlinedIcon sx={{ fontSize: '16px !important' }} /> : <HowToRegIcon sx={{ fontSize: '16px !important' }} />}
+                      label={isRoleAccess ? 'Additional Role Request' : 'New User Registration'}
+                      sx={{
+                        fontWeight: 700,
+                        borderRadius: 999,
+                        bgcolor: isRoleAccess ? 'rgba(124,58,237,0.10)' : 'rgba(37,99,235,0.10)',
+                        color: isRoleAccess ? '#6D28D9' : '#1D4ED8',
+                        border: `1px solid ${isRoleAccess ? 'rgba(124,58,237,0.18)' : 'rgba(37,99,235,0.18)'}`,
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 220 }}>
+                    <EmployeeMiniIdentity name={row.full_name} caption={row.employee_id} />
+                  </TableCell>
+                  <TableCell sx={{ color: colors.muted, minWidth: 220 }}>{row.email}</TableCell>
+                  <TableCell sx={{ minWidth: 260 }}>
+                    {isRoleAccess ? (
+                      <Stack spacing={0.75}>
+                        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                          {existingRoles.map((code) => (
+                            <Chip key={code} size="small" label={formatEnum(code)} sx={{ height: 22, fontSize: 11, fontWeight: 700 }} />
+                          ))}
+                        </Stack>
+                        <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                          <Typography variant="caption" color="text.secondary">Requested:</Typography>
+                          <Chip
+                            size="small"
+                            label={formatEnum(row.requested_role_code) || row.requested_role_name}
+                            color="primary"
+                            variant="outlined"
+                            sx={{ height: 22, fontSize: 11, fontWeight: 800 }}
+                          />
+                        </Stack>
+                      </Stack>
+                    ) : (
+                      <Typography variant="body2">{row.requested_department_name}</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 130 }}>
+                    <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                      {formatDate(row.created_at)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 120 }}>
+                    <Chip
+                      size="small"
+                      label={isRoleAccess ? (row.status || 'PENDING') : 'PENDING'}
+                      sx={{
+                        height: 22,
+                        fontSize: 11,
+                        fontWeight: 800,
+                        bgcolor: 'rgba(245,158,11,0.12)',
+                        color: '#B45309',
+                        border: '1px solid rgba(245,158,11,0.22)',
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 220 }}>
+                    {isRoleAccess ? (
+                      <Typography variant="body2" color="text.secondary">
+                        {row.department_name || '—'}
+                      </Typography>
+                    ) : (
+                      <Stack spacing={1}>
+                        <TextField select size="small" label="Confirm Department" value={approval[row.id]?.departmentId || ''} onChange={(e) => setApprovalField(row.id, 'departmentId', e.target.value)} fullWidth>
+                          {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+                        </TextField>
+                        <TextField select size="small" label="Assign Role" value={approval[row.id]?.roleId || ''} onChange={(e) => setApprovalField(row.id, 'roleId', e.target.value)} fullWidth>
+                          {roles.map((role) => <MenuItem key={role.id} value={role.id}>{role.name}</MenuItem>)}
+                        </TextField>
+                      </Stack>
+                    )}
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 120 }}>
+                    {isRoleAccess ? (
+                      justification ? (
+                        <Tooltip
+                          title={(
+                            <Box sx={{ maxWidth: 320 }}>
+                              <Typography variant="caption" sx={{ display: 'block', fontWeight: 800, mb: 0.5 }}>Request reason</Typography>
+                              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{justification}</Typography>
+                            </Box>
+                          )}
+                          arrow
+                          placement="left"
+                        >
+                          <IconButton size="small" aria-label="View request reason" sx={{ color: colors.primary }}>
+                            <InfoOutlinedIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">No reason provided</Typography>
+                      )
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">—</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 190 }}>
+                    <Stack direction="row" spacing={1} sx={{ '& .MuiButton-root': { whiteSpace: 'nowrap', borderRadius: adminRadius.control } }}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        onClick={() => (isRoleAccess ? onApproveRoleAccess(row.id) : onApproveRegistration(row.id))}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="small"
+                        color="error"
+                        variant="outlined"
+                        onClick={() => (isRoleAccess ? onRejectRoleAccess(row.id) : onRejectRegistration(row.id))}
+                      >
+                        Reject
+                      </Button>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>

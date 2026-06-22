@@ -32,9 +32,9 @@ import { useToast } from '../components/ToastProvider';
 import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
 
 const viewModes = [
-  { id: 'hierarchy', label: 'Organization Hierarchy', icon: AccountTreeIcon },
-  { id: 'departments', label: 'Department Directory', icon: BusinessIcon },
-  { id: 'table', label: 'Directory Table', icon: TableRowsIcon },
+  { id: 'hierarchy', label: 'Organization Hierarchy', shortLabel: 'Hierarchy', icon: AccountTreeIcon },
+  { id: 'departments', label: 'Department Directory', shortLabel: 'Departments', icon: BusinessIcon },
+  { id: 'table', label: 'Directory Table', shortLabel: 'Table', icon: TableRowsIcon },
 ];
 
 export default function OrganizationDirectoryPage() {
@@ -75,7 +75,12 @@ export default function OrganizationDirectoryPage() {
     load();
   }, []);
 
-  const roles = useMemo(() => [...new Set(users.map((user) => user.role_code).filter(Boolean))], [users]);
+  const roles = useMemo(() => [...new Set(users.flatMap((user) => (
+    String(user.role_codes || user.role_code || '')
+      .split(',')
+      .map((code) => code.trim())
+      .filter(Boolean)
+  )))], [users]);
   const managers = useMemo(() => [...new Map(users
     .filter((user) => user.manager_id)
     .map((user) => [user.manager_id, { id: user.manager_id, name: user.manager_name }])).values()], [users]);
@@ -92,7 +97,7 @@ export default function OrganizationDirectoryPage() {
     ].some((value) => String(value || '').toLowerCase().includes(search));
     return matchesSearch
       && (!filters.departmentId || String(user.department_id) === String(filters.departmentId))
-      && (!filters.role || user.role_code === filters.role)
+      && (!filters.role || String(user.role_codes || user.role_code || '').split(',').includes(filters.role))
       && (!filters.status || user.status === filters.status)
       && (!filters.manager || String(user.manager_id) === String(filters.manager));
   }), [users, filters]);
@@ -170,7 +175,17 @@ export default function OrganizationDirectoryPage() {
             overflow: 'hidden',
           }}
         >
-          <Stack direction="row" spacing={0.5} sx={{ px: 1.5, pt: 1.25, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, overflowX: 'auto' }}>
+          <Stack
+            direction="row"
+            spacing={0.5}
+            sx={{
+              px: { xs: 0.75, sm: 1.5 },
+              pt: 1.25,
+              borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
+              overflowX: 'auto',
+              scrollbarWidth: 'thin',
+            }}
+          >
             {viewModes.map((mode) => {
               const Icon = mode.icon;
               return (
@@ -180,47 +195,62 @@ export default function OrganizationDirectoryPage() {
                   onClick={() => setViewMode(mode.id)}
                   sx={{
                     minHeight: 38,
-                    px: 1.5,
+                    px: { xs: 1, sm: 1.5 },
                     borderRadius: 0,
                     whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    fontSize: { xs: 12, sm: 13 },
                     color: viewMode === mode.id ? 'primary.main' : 'text.secondary',
                     borderBottom: viewMode === mode.id ? '2px solid' : '2px solid transparent',
                     borderColor: viewMode === mode.id ? 'primary.main' : 'transparent',
                     '&:hover': { boxShadow: 'none', transform: 'none' },
                   }}
                 >
-                  {mode.label}
+                  <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>{mode.label}</Box>
+                  <Box component="span" sx={{ display: { xs: 'inline', md: 'none' } }}>{mode.shortLabel}</Box>
                 </Button>
               );
             })}
           </Stack>
 
-          <Stack direction="row" spacing={1} sx={{ p: 1.35, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: (theme) => theme.custom.semantic.paperSoft, flexWrap: 'wrap' }}>
-            <TextField
-              label="Search Users"
-              value={filters.search}
-              onChange={(event) => setFilter('search', event.target.value)}
-              InputProps={{ startAdornment: <SearchIcon color="action" fontSize="small" sx={{ mr: 0.75 }} /> }}
-              sx={{ width: { xs: '100%', md: 300 } }}
-            />
-            <TextField select label="Filter Department" value={filters.departmentId} onChange={(event) => setFilter('departmentId', event.target.value)} sx={{ width: { xs: '100%', sm: 190 } }}>
-              <MenuItem value="">All departments</MenuItem>
-              {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
-            </TextField>
-            <TextField select label="Filter Role" value={filters.role} onChange={(event) => setFilter('role', event.target.value)} sx={{ width: { xs: '100%', sm: 170 } }}>
-              <MenuItem value="">All roles</MenuItem>
-              {roles.map((role) => <MenuItem key={role} value={role}>{formatEnum(role)}</MenuItem>)}
-            </TextField>
-            <TextField select label="Status" value={filters.status} onChange={(event) => setFilter('status', event.target.value)} sx={{ width: { xs: '100%', sm: 145 } }}>
-              <MenuItem value="">All statuses</MenuItem>
-              {['ACTIVE', 'PENDING_APPROVAL'].map((status) => <MenuItem key={status} value={status}>{formatEnum(status)}</MenuItem>)}
-            </TextField>
-            <TextField select label="Manager" value={filters.manager} onChange={(event) => setFilter('manager', event.target.value)} sx={{ width: { xs: '100%', sm: 190 } }}>
-              <MenuItem value="">All managers</MenuItem>
-              {managers.map((manager) => <MenuItem key={manager.id} value={manager.id}>{manager.name}</MenuItem>)}
-            </TextField>
-            <Button variant="outlined" onClick={clearFilters} sx={{ ml: { md: 'auto' }, width: { xs: '100%', sm: 'auto' } }}>Clear</Button>
-          </Stack>
+          <Grid container spacing={1.25} sx={{ p: 1.35, borderBottom: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`, bgcolor: (theme) => theme.custom.semantic.paperSoft }}>
+            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+              <TextField
+                label="Search Users"
+                value={filters.search}
+                onChange={(event) => setFilter('search', event.target.value)}
+                InputProps={{ startAdornment: <SearchIcon color="action" fontSize="small" sx={{ mr: 0.75 }} /> }}
+                fullWidth
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 2.2 }}>
+              <TextField select label="Filter Department" value={filters.departmentId} onChange={(event) => setFilter('departmentId', event.target.value)} fullWidth>
+                <MenuItem value="">All departments</MenuItem>
+                {departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 2 }}>
+              <TextField select label="Filter Role" value={filters.role} onChange={(event) => setFilter('role', event.target.value)} fullWidth>
+                <MenuItem value="">All roles</MenuItem>
+                {roles.map((role) => <MenuItem key={role} value={role}>{formatEnum(role)}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 1.6 }}>
+              <TextField select label="Status" value={filters.status} onChange={(event) => setFilter('status', event.target.value)} fullWidth>
+                <MenuItem value="">All statuses</MenuItem>
+                {['ACTIVE', 'PENDING_APPROVAL'].map((status) => <MenuItem key={status} value={status}>{formatEnum(status)}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, lg: 2.2 }}>
+              <TextField select label="Manager" value={filters.manager} onChange={(event) => setFilter('manager', event.target.value)} fullWidth>
+                <MenuItem value="">All managers</MenuItem>
+                {managers.map((manager) => <MenuItem key={manager.id} value={manager.id}>{manager.name}</MenuItem>)}
+              </TextField>
+            </Grid>
+            <Grid size={{ xs: 12, lg: 1 }} sx={{ display: 'flex', alignItems: 'stretch' }}>
+              <Button variant="outlined" onClick={clearFilters} fullWidth sx={{ minHeight: 56 }}>Clear</Button>
+            </Grid>
+          </Grid>
         </Box>
 
         {error && <Alert severity="error">{error}</Alert>}
@@ -237,6 +267,29 @@ export default function OrganizationDirectoryPage() {
       </Stack>
 
     </Page>
+  );
+}
+
+function formatUserRoles(user) {
+  const codes = String(user.role_codes || user.role_code || '')
+    .split(',')
+    .map((code) => code.trim())
+    .filter(Boolean);
+  return codes.length ? codes.map((code) => formatEnum(code)).join(', ') : formatEnum(user.role_code);
+}
+
+function UserRoleChips({ user }) {
+  const codes = String(user.role_codes || user.role_code || '')
+    .split(',')
+    .map((code) => code.trim())
+    .filter(Boolean);
+  if (!codes.length) return formatEnum(user.role_code);
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+      {codes.map((code) => (
+        <Chip key={code} size="small" label={formatEnum(code)} sx={{ borderRadius: 1, fontWeight: 700 }} />
+      ))}
+    </Stack>
   );
 }
 
@@ -367,7 +420,7 @@ function DirectoryTable({ users, onCopyEmail }) {
                 <TableCell><UserIdentity user={user} /></TableCell>
                 <TableCell sx={{ overflowWrap: 'anywhere' }}>{user.email}</TableCell>
                 <TableCell sx={{ overflowWrap: 'anywhere' }}>{user.department_name || '-'}</TableCell>
-                <TableCell>{formatEnum(user.role_code)}</TableCell>
+                <TableCell><UserRoleChips user={user} /></TableCell>
                 <TableCell>{user.manager_name || '-'}</TableCell>
                 <TableCell><Chip size="small" label={formatEnum(user.status)} sx={{ borderRadius: 1, fontWeight: 750 }} /></TableCell>
                 <TableCell>{formatDate(user.created_at)}</TableCell>
@@ -393,7 +446,7 @@ function EmployeeCard({ user, isHead = false, onCopyEmail }) {
           <Typography variant="caption" display="block">Phone: {user.mobile_number || 'Not provided'}</Typography>
           <Typography variant="caption" display="block">Employee ID: {user.employee_id}</Typography>
           <Typography variant="caption" display="block">Joined: {formatDate(user.created_at)}</Typography>
-          <Typography variant="caption" display="block">Role: {formatEnum(user.role_code)}</Typography>
+          <Typography variant="caption" display="block">Role: {formatUserRoles(user)}</Typography>
           <Typography variant="caption" display="block">Department: {user.department_name}</Typography>
         </Box>
       )}
@@ -421,7 +474,7 @@ function EmployeeCard({ user, isHead = false, onCopyEmail }) {
               {isHead && <Chip size="small" label="Department Head" sx={{ height: 20, borderRadius: 1, fontSize: 11, fontWeight: 850 }} />}
             </Stack>
             <Typography variant="caption" color="text.secondary" noWrap display="block">{user.designation || 'Employee'}</Typography>
-            <Typography variant="caption" color="text.secondary" noWrap display="block">{formatEnum(user.role_code)} · {user.department_name}</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap display="block">{formatUserRoles(user)} · {user.department_name}</Typography>
           </Box>
           <Button size="small" onClick={() => onCopyEmail(user.email)} sx={{ minWidth: 0, px: 0.75 }}>
             <ContentCopyIcon sx={{ fontSize: 16 }} />

@@ -4,12 +4,13 @@ from sqlalchemy.orm import Session
 from app.core.database import execute, get_db, rows
 from app.middleware.auth import get_current_user
 from app.utils.http import ok
+from app.utils.routing import collection_route
 
 
 router = APIRouter(prefix="/notifications", tags=["notifications"], dependencies=[Depends(get_current_user)])
 
 
-@router.get("/")
+@collection_route(router, "get")
 def list_notifications(isRead: str = "", user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     return ok(rows(db, """
         SELECT n.*, r.request_number, r.title AS request_title

@@ -66,7 +66,7 @@ const workflowSteps = [
   { key: 'IN_DEVELOPMENT', label: 'Work In Progress', description: 'Active implementation', matches: ['IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'] },
   { key: 'QA_PENDING', label: 'Review & Validation', description: 'Quality review and validation', matches: ['QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'IN_TESTING', 'TEST_FAILED'] },
   { key: 'UAT_PENDING', label: 'Requester Testing', description: 'Requester user testing and approval', matches: ['UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'UAT_REJECTED'] },
-  { key: 'DEPLOYMENT_PENDING', label: 'Deployment Ready', description: 'Deployment and release', matches: ['DEPLOYMENT_PENDING', 'DEPLOYED'] },
+  { key: 'DEPLOYMENT_PENDING', label: 'Final Deployment Pending', description: 'Deployment and release', matches: ['DEPLOYMENT_PENDING', 'DEPLOYED'] },
   { key: 'READY_FOR_COMPLETION', label: 'Requester Confirmation', description: 'Requester final completion', matches: ['READY_FOR_COMPLETION'] },
   { key: 'CLOSED', label: 'Completed', description: 'Request completed', matches: ['CLOSED'] },
 ];
@@ -909,7 +909,14 @@ export default function RequestDetailPage() {
               />
             </Box>
 
-            <Box sx={{ order: { xs: 6 } }}>
+            <Box
+              sx={{
+                order: { xs: 2, lg: 6 },
+                position: { xs: 'sticky', lg: 'static' },
+                bottom: { xs: 12, lg: 'auto' },
+                zIndex: { xs: 20, lg: 'auto' },
+              }}
+            >
               <WorkflowActions
                 request={request}
                 user={user}
@@ -4361,10 +4368,10 @@ const workflowMilestoneLabels = {
   UAT_PENDING: 'Requester UAT',
   UAT_FAILED: 'UAT Failed',
   UAT_APPROVED: 'UAT Approved',
-  DEPLOYMENT_PENDING: 'Deployment Pending',
+  DEPLOYMENT_PENDING: 'Final Deployment Pending',
   DEPLOYED: 'Deployed',
   READY_FOR_COMPLETION: 'Ready For Closure',
-  CLOSED: 'Completed',
+  CLOSED: 'Sign-Off',
 };
 
 function buildWorkflowMilestones(events = []) {

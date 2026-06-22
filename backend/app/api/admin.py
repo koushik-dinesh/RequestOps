@@ -6,6 +6,12 @@ from app.core.security import hash_password
 from app.middleware.auth import require_roles
 from app.schemas.payloads import PasswordPayload, RegistrationApprovePayload, RejectPayload
 from app.services.activity_service import audit, notify
+from app.services.user_role_service import (
+    approve_role_access_request,
+    grant_user_role,
+    list_role_access_requests,
+    reject_role_access_request,
+)
 from app.utils.http import ApiError, ok
 
 
@@ -107,6 +113,7 @@ def approve_registration(
         },
     )
     created_user_id = created.lastrowid
+    grant_user_role(db, created_user_id, payload.roleId, user["id"])
     execute(
         db,
         """
@@ -154,6 +161,139 @@ def reject_registration(registration_id: int, payload: RejectPayload, request: R
     audit(db, actor_user_id=user["id"], action="REGISTRATION_REJECTED", entity_type="USER_REGISTRATION", entity_id=registration_id, new_value={"reason": payload.reason}, request=request)
     db.commit()
     return ok({"id": registration_id, "status": "REJECTED"})
+
+
+@router.get("/role-access-requests")
+def role_access_requests(status: str = "PENDING", db: Session = Depends(get_db)):
+    return ok(list_role_access_requests(db, status))
+
+
+@router.post("/role-access-requests/{request_id}/approve")
+def approve_role_access(
+    request_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: dict = Depends(require_roles("SYSTEM_ADMIN")),
+    db: Session = Depends(get_db),
+):
+    before = one(db, "SELECT * FROM role_access_requests WHERE id = :id", {"id": request_id})
+    if not before:
+        raise ApiError(404, "Role access request not found.")
+    updated = approve_role_access_request(db, request_id, admin["id"])
+    requested_role = one(db, "SELECT id, code, name FROM roles WHERE id = :id", {"id": updated["requested_role_id"]})
+    requester = one(db, "SELECT id, full_name, email FROM users WHERE id = :id", {"id": updated["user_id"]})
+    existing_roles = rows(
+        db,
+        """
+        SELECT r.code, r.name
+        FROM user_roles ur
+        JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = :userId
+        ORDER BY r.name
+        """,
+        {"userId": updated["user_id"]},
+    )
+    notify(
+        db,
+        recipient_user_id=updated["user_id"],
+        type="ROLE_ACCESS_APPROVED",
+        title="Additional role access approved",
+        message=f"Your request for {requested_role['name']} access has been approved.",
+        background_tasks=background_tasks,
+    )
+    audit(
+        db,
+        actor_user_id=admin["id"],
+        action="ROLE_ACCESS_REQUEST_APPROVED",
+        entity_type="ROLE_ACCESS_REQUEST",
+        entity_id=request_id,
+        old_value={"status": before["status"]},
+        new_value={
+            "status": "APPROVED",
+            "requestId": request_id,
+            "userId": updated["user_id"],
+            "userName": requester["full_name"] if requester else None,
+            "userEmail": requester["email"] if requester else None,
+            "approverId": admin["id"],
+            "approverName": admin["full_name"],
+            "roleId": updated["requested_role_id"],
+            "roleCode": requested_role["code"],
+            "roleName": requested_role["name"],
+        },
+        request=request,
+    )
+    audit(
+        db,
+        actor_user_id=admin["id"],
+        action="ROLE_ASSIGNED",
+        entity_type="USER",
+        entity_id=updated["user_id"],
+        new_value={
+            "userId": updated["user_id"],
+            "userName": requester["full_name"] if requester else None,
+            "userEmail": requester["email"] if requester else None,
+            "assignedById": admin["id"],
+            "assignedByName": admin["full_name"],
+            "roleId": updated["requested_role_id"],
+            "roleCode": requested_role["code"],
+            "roleName": requested_role["name"],
+            "existingRoles": [{"code": role["code"], "name": role["name"]} for role in existing_roles],
+            "source": "ROLE_ACCESS_REQUEST",
+            "requestId": request_id,
+        },
+        request=request,
+    )
+    db.commit()
+    return ok({"id": request_id, "status": "APPROVED"})
+
+
+@router.post("/role-access-requests/{request_id}/reject")
+def reject_role_access(
+    request_id: int,
+    payload: RejectPayload,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: dict = Depends(require_roles("SYSTEM_ADMIN")),
+    db: Session = Depends(get_db),
+):
+    before = one(db, "SELECT * FROM role_access_requests WHERE id = :id", {"id": request_id})
+    if not before:
+        raise ApiError(404, "Role access request not found.")
+    updated = reject_role_access_request(db, request_id, admin["id"])
+    requested_role = one(db, "SELECT code, name FROM roles WHERE id = :id", {"id": updated["requested_role_id"]})
+    requester = one(db, "SELECT id, full_name, email FROM users WHERE id = :id", {"id": updated["user_id"]})
+    notify(
+        db,
+        recipient_user_id=updated["user_id"],
+        type="ROLE_ACCESS_REJECTED",
+        title="Additional role access rejected",
+        message=f"Your request for {requested_role['name']} access was not approved. Reason: {payload.reason}",
+        background_tasks=background_tasks,
+    )
+    audit(
+        db,
+        actor_user_id=admin["id"],
+        action="ROLE_ACCESS_REQUEST_REJECTED",
+        entity_type="ROLE_ACCESS_REQUEST",
+        entity_id=request_id,
+        old_value={"status": before["status"]},
+        new_value={
+            "status": "REJECTED",
+            "requestId": request_id,
+            "userId": updated["user_id"],
+            "userName": requester["full_name"] if requester else None,
+            "userEmail": requester["email"] if requester else None,
+            "approverId": admin["id"],
+            "approverName": admin["full_name"],
+            "roleId": updated["requested_role_id"],
+            "roleCode": requested_role["code"],
+            "roleName": requested_role["name"],
+            "reason": payload.reason,
+        },
+        request=request,
+    )
+    db.commit()
+    return ok({"id": request_id, "status": "REJECTED"})
 
 
 @router.get("/audit-logs")

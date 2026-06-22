@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db, rows
 from app.middleware.auth import get_current_user
 from app.utils.http import ok
+from app.utils.routing import collection_route
 
 
 router = APIRouter(prefix="/developer-workload", tags=["developer-workload"], dependencies=[Depends(get_current_user)])
@@ -43,7 +44,7 @@ def active_status_sql() -> str:
     return ", ".join(f"'{status}'" for status in ACTIVE_WORK_STATUSES)
 
 
-@router.get("/")
+@collection_route(router, "get")
 def list_developer_workload(_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     developers = rows(db, f"""
         SELECT

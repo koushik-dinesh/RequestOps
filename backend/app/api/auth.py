@@ -6,8 +6,14 @@ from sqlalchemy.orm import Session
 from app.core.database import execute, get_db, one, rows
 from app.core.security import decode_refresh_token, hash_password, sign_tokens, verify_password
 from app.middleware.auth import get_current_user
-from app.schemas.payloads import LoginPayload, RefreshPayload, RegisterPayload
+from app.schemas.payloads import LoginPayload, RefreshPayload, RegisterPayload, RoleAccessRequestPayload, SelectRolePayload
 from app.services.activity_service import audit, notify_role
+from app.services.user_role_service import (
+    create_role_access_request,
+    get_pending_role_request_codes,
+    get_user_roles,
+    resolve_active_role,
+)
 from app.utils.http import ApiError, ok
 
 
@@ -139,6 +145,27 @@ def register(payload: RegisterPayload, request: Request, background_tasks: Backg
     return ok({"id": registration_id, "employeeId": employee_id, "status": "PENDING_APPROVAL"}, 201)
 
 
+def build_auth_user(user: dict, db: Session) -> dict:
+    roles = get_user_roles(db, user["id"])
+    return {
+        "id": user["id"],
+        "employeeId": user["employee_id"],
+        "fullName": user["full_name"],
+        "email": user["email"],
+        "roleCode": user["role_code"],
+        "roleName": user["role_name"],
+        "departmentId": user["department_id"],
+        "departmentName": user["department_name"],
+        "departmentHeadId": user["department_head_id"],
+        "departmentHeadName": user["department_head_name"],
+        "departmentHeadEmail": user["department_head_email"],
+        "availableRoles": [
+            {"code": role["code"], "name": role["name"], "isPrimary": bool(role.get("is_primary"))}
+            for role in roles
+        ],
+    }
+
+
 @router.post("/login")
 def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)):
     user = one(
@@ -165,25 +192,38 @@ def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)
         audit(db, actor_user_id=user["id"], action="LOGIN_FAILED", entity_type="USER", entity_id=user["id"], request=request)
         db.commit()
         raise ApiError(401, "Invalid credentials or inactive account.")
+
+    roles = get_user_roles(db, user["id"])
+    if not roles:
+        grant_user_role(db, user["id"], user["role_id"])
+        roles = get_user_roles(db, user["id"])
+
+    if len(roles) > 1 and not payload.roleCode:
+        db.commit()
+        return ok({
+            "requiresRoleSelection": True,
+            "user": {
+                "id": user["id"],
+                "fullName": user["full_name"],
+                "email": user["email"],
+                "departmentName": user["department_name"],
+            },
+            "availableRoles": [
+                {"code": role["code"], "name": role["name"], "isPrimary": bool(role.get("is_primary"))}
+                for role in roles
+            ],
+        })
+
+    active_role = resolve_active_role(db, user["id"], payload.roleCode)
+    user["role_code"] = active_role["code"]
+    user["role_name"] = active_role["name"]
     execute(db, "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = :id", {"id": user["id"]})
-    audit(db, actor_user_id=user["id"], action="LOGIN_SUCCESS", entity_type="USER", entity_id=user["id"], request=request)
+    audit(db, actor_user_id=user["id"], action="LOGIN_SUCCESS", entity_type="USER", entity_id=user["id"], new_value={"roleCode": active_role["code"]}, request=request)
     db.commit()
-    tokens = sign_tokens(user)
+    tokens = sign_tokens(user, active_role["code"])
     return ok({
         **tokens,
-        "user": {
-            "id": user["id"],
-            "employeeId": user["employee_id"],
-            "fullName": user["full_name"],
-            "email": user["email"],
-            "roleCode": user["role_code"],
-            "roleName": user["role_name"],
-            "departmentId": user["department_id"],
-            "departmentName": user["department_name"],
-            "departmentHeadId": user["department_head_id"],
-            "departmentHeadName": user["department_head_name"],
-            "departmentHeadEmail": user["department_head_email"],
-        },
+        "user": build_auth_user(user, db),
     })
 
 
@@ -193,7 +233,7 @@ def refresh(payload: RefreshPayload, db: Session = Depends(get_db)):
     user = one(
         db,
         """
-        SELECT u.id, u.email, r.code AS role_code
+        SELECT u.id, u.email, r.code AS role_code, r.name AS role_name
         FROM users u JOIN roles r ON r.id = u.role_id
         WHERE u.id = :id AND u.status = 'ACTIVE'
         """,
@@ -201,11 +241,68 @@ def refresh(payload: RefreshPayload, db: Session = Depends(get_db)):
     )
     if not user:
         raise ApiError(401, "Refresh token is no longer valid.")
-    return ok(sign_tokens(user))
+    active_role_code = decoded.get("role")
+    if active_role_code:
+        active_role = resolve_active_role(db, user["id"], active_role_code)
+        user["role_code"] = active_role["code"]
+        user["role_name"] = active_role["name"]
+    return ok(sign_tokens(user, user["role_code"]))
+
+
+@router.post("/switch-role")
+def switch_role(payload: SelectRolePayload, request: Request, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    active_role = resolve_active_role(db, user["id"], payload.roleCode)
+    user["role_code"] = active_role["code"]
+    user["role_name"] = active_role["name"]
+    audit(db, actor_user_id=user["id"], action="ROLE_SWITCHED", entity_type="USER", entity_id=user["id"], new_value={"roleCode": active_role["code"]}, request=request)
+    db.commit()
+    return ok({
+        **sign_tokens(user, active_role["code"]),
+        "user": build_auth_user(user, db),
+    })
+
+
+@router.post("/role-access-requests")
+def request_role_access(
+    payload: RoleAccessRequestPayload,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    request_row = create_role_access_request(db, user["id"], payload.roleCode, payload.reason)
+    requested_role = one(db, "SELECT id, code, name FROM roles WHERE code = :code", {"code": payload.roleCode})
+    notify_role(
+        db,
+        "SYSTEM_ADMIN",
+        type="ROLE_ACCESS_REQUEST",
+        title="Role access request submitted",
+        message=f"{user['full_name']} requested access to {payload.roleCode}.",
+        background_tasks=background_tasks,
+    )
+    audit(
+        db,
+        actor_user_id=user["id"],
+        action="ROLE_ACCESS_REQUEST_CREATED",
+        entity_type="ROLE_ACCESS_REQUEST",
+        entity_id=request_row["id"],
+        new_value={
+            "userId": user["id"],
+            "userName": user["full_name"],
+            "userEmail": user["email"],
+            "roleId": requested_role["id"] if requested_role else None,
+            "roleCode": payload.roleCode,
+            "roleName": requested_role["name"] if requested_role else payload.roleCode,
+            "status": "PENDING",
+        },
+        request=request,
+    )
+    db.commit()
+    return ok({"id": request_row["id"], "status": request_row["status"]}, 201)
 
 
 @router.get("/me")
-def me(user: dict = Depends(get_current_user)):
+def me(user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     return ok({
         "id": user["id"],
         "employeeId": user["employee_id"],
@@ -218,9 +315,11 @@ def me(user: dict = Depends(get_current_user)):
         "departmentId": user["department_id"],
         "departmentName": user["department_name"],
         "departmentCode": user["department_code"],
-        "departmentHeadId": user["department_head_id"],
-        "departmentHeadName": user["department_head_name"],
-        "departmentHeadEmail": user["department_head_email"],
+        "availableRoles": [
+            {"code": role["code"], "name": role["name"], "isPrimary": bool(role.get("is_primary"))}
+            for role in get_user_roles(db, user["id"])
+        ],
+        "pendingRoleRequests": get_pending_role_request_codes(db, user["id"]),
     })
 
 

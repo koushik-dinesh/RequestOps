@@ -34,7 +34,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
-      const requestEndpoint = user?.roleCode === 'EMPLOYEE' ? '/requests?mine=true' : '/requests';
+      const showAllRequests = ['EMPLOYEE', 'SYSTEM_ADMIN', 'IT_HEAD'].includes(user?.roleCode);
+      const requestEndpoint = showAllRequests ? '/requests' : (user?.roleCode === 'EMPLOYEE' ? '/requests?mine=true' : '/requests');
       const [dashboardData, requestRows, departmentRows, notificationRows] = await Promise.all([
         api.get('/dashboard/me'),
         api.get(requestEndpoint),
@@ -128,6 +129,12 @@ export default function DashboardPage() {
           )}
         />
 
+        {dashboard.overviewNote && (
+          <Typography variant="body2" color="text.secondary" sx={{ px: 0.5 }}>
+            {dashboard.overviewNote}
+          </Typography>
+        )}
+
         <Grid container spacing={1.75}>
           {kpiCards.map((card) => (
             <Grid key={card.title} size={{ xs: 12, sm: 6, lg: 3, xl: kpiCards.length >= 7 ? 12 / 7 : 12 / Math.max(kpiCards.length, 1) }}>
@@ -198,9 +205,9 @@ function Panel({ title, subtitle, children }) {
   );
 }
 
-function KpiCard({ title, value, change, tone, icon }) {
+function KpiCard({ title, value, change, tone, icon, href }) {
   const color = toneColor(tone);
-  return (
+  const content = (
     <Box
       sx={{
         minHeight: 132,
@@ -208,6 +215,15 @@ function KpiCard({ title, value, change, tone, icon }) {
         borderRadius: 3,
         border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
         bgcolor: (theme) => theme.custom.semantic.elevated,
+        cursor: href ? 'pointer' : 'default',
+        transition: 'transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease',
+        ...(href ? {
+          '&:hover': {
+            transform: 'translateY(-2px)',
+            boxShadow: '0 10px 24px rgba(15,23,42,0.08)',
+            borderColor: `${color}55`,
+          },
+        } : {}),
       }}
     >
       <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -217,6 +233,13 @@ function KpiCard({ title, value, change, tone, icon }) {
       <Typography variant="h4" sx={{ mt: 2, fontSize: 30 }}>{value}</Typography>
       <Typography variant="body2" color="text.secondary" fontWeight={700} sx={{ overflowWrap: 'anywhere' }}>{title}</Typography>
       <MiniTrend color={color} />
+    </Box>
+  );
+
+  if (!href) return content;
+  return (
+    <Box component={Link} to={href} sx={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
+      {content}
     </Box>
   );
 }
@@ -592,6 +615,7 @@ function buildRoleKpiCards(cards = []) {
     'Developer Workload': { tone: 'purple', icon: <Users size={17} />, change: 'Open assigned tasks' },
     Overdue: { tone: 'danger', icon: <ClipboardCheck size={17} />, change: 'Needs attention' },
     Completed: { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Completed work' },
+    'Sign-Off': { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Signed off' },
     'Review & Validation': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Review queue' },
     'Pending Review': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Ready for review' },
     'In Review': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Under review' },
@@ -609,6 +633,7 @@ function buildRoleKpiCards(cards = []) {
   return cards.map((card) => ({
     title: card.label,
     value: card.value,
+    href: card.href,
     ...(metadata[card.label] || { tone: 'neutral', icon: <GitPullRequest size={17} />, change: 'Role scoped' }),
   }));
 }

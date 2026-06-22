@@ -12,7 +12,9 @@ from app.schemas.payloads import (
     UserPatchPayload,
 )
 from app.services.activity_service import audit
+from app.services.user_role_service import grant_user_role
 from app.utils.http import ApiError, ok
+from app.utils.routing import collection_route
 
 
 router = APIRouter(prefix="/users", tags=["users"], dependencies=[Depends(get_current_user)])
@@ -158,6 +160,12 @@ def directory(db: Session = Depends(get_db)):
                COALESCE(rm.full_name, dh.full_name) AS manager_name,
                COALESCE(rm.email, dh.email) AS manager_email,
                r.id AS role_id, r.code AS role_code, r.name AS role_name,
+               (
+                 SELECT GROUP_CONCAT(DISTINCT r2.code ORDER BY r2.name SEPARATOR ',')
+                 FROM user_roles ur2
+                 JOIN roles r2 ON r2.id = ur2.role_id
+                 WHERE ur2.user_id = u.id
+               ) AS role_codes,
                CASE WHEN d.department_head_user_id = u.id THEN TRUE ELSE FALSE END AS is_department_head
         FROM users u
         JOIN roles r ON r.id = u.role_id
@@ -169,7 +177,7 @@ def directory(db: Session = Depends(get_db)):
     """))
 
 
-@router.get("/")
+@collection_route(router, "get")
 def list_users(search: str = "", role: str = "", departmentId: str = "", status: str = "", _user: dict = Depends(require_roles("SYSTEM_ADMIN", "IT_HEAD", "PROJECT_MANAGER")), db: Session = Depends(get_db)):
     return ok(rows(db, """
         SELECT u.id, u.employee_id, u.full_name, u.email, u.mobile_number, u.designation,
@@ -306,6 +314,7 @@ def change_role(user_id: int, payload: ChangeRolePayload, request: Request, admi
     if payload.replacementDepartmentHeadUserId:
         execute(db, "UPDATE departments SET department_head_user_id = :replacement WHERE department_head_user_id = :userId", {"replacement": payload.replacementDepartmentHeadUserId, "userId": user_id})
     execute(db, "UPDATE users SET role_id = :roleId WHERE id = :userId", {"roleId": role["id"], "userId": user_id})
+    grant_user_role(db, user_id, role["id"], admin["id"])
     if role["code"] == "DEPARTMENT_HEAD" and existing.get("department_id"):
         execute(db, "UPDATE departments SET department_head_user_id = :userId WHERE id = :departmentId", {"userId": user_id, "departmentId": existing["department_id"]})
     audit(db, actor_user_id=admin["id"], action="ROLE_CHANGED", entity_type="USER", entity_id=user_id, old_value={"roleId": existing["role_id"], "roleCode": existing["role_code"], "roleName": existing["role_name"]}, new_value={"roleId": role["id"], "roleCode": role["code"], "roleName": role["name"], "replacementDepartmentHeadUserId": payload.replacementDepartmentHeadUserId}, request=request)

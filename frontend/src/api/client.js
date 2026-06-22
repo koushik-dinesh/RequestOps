@@ -9,7 +9,19 @@ const api = axios.create({
   baseURL,
 });
 
+function normalizeRequestUrl(url = '') {
+  if (!url.startsWith('/')) {
+    return url;
+  }
+  const [path, query = ''] = url.split('?');
+  const normalizedPath = path.replace(/\/+$/, '') || '/';
+  return query ? `${normalizedPath}?${query}` : normalizedPath;
+}
+
 api.interceptors.request.use((config) => {
+  if (config.url) {
+    config.url = normalizeRequestUrl(config.url);
+  }
   const token = localStorage.getItem('requestops.accessToken');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

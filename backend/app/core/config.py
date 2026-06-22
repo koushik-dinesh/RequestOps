@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     port: int = Field(default=5015, alias="PORT")
     client_origin: str = Field(default="http://localhost:5173", alias="CLIENT_ORIGIN")
     app_public_base_url: str | None = Field(default=None, alias="APP_PUBLIC_BASE_URL")
+    app_base_path: str = Field(default="/srt", alias="APP_BASE_PATH")
 
     db_host: str = Field(default="127.0.0.1", alias="DB_HOST")
     db_port: int = Field(default=3306, alias="DB_PORT")
@@ -22,8 +23,8 @@ class Settings(BaseSettings):
 
     jwt_access_secret: str = Field(default="dev-access-secret-change-me", alias="JWT_ACCESS_SECRET")
     jwt_refresh_secret: str = Field(default="dev-refresh-secret-change-me", alias="JWT_REFRESH_SECRET")
-    jwt_access_expires_in: str = Field(default="30m", alias="JWT_ACCESS_EXPIRES_IN")
-    jwt_refresh_expires_in: str = Field(default="7d", alias="JWT_REFRESH_EXPIRES_IN")
+    jwt_access_expires_in: str = Field(default="8h", alias="JWT_ACCESS_EXPIRES_IN")
+    jwt_refresh_expires_in: str = Field(default="30d", alias="JWT_REFRESH_EXPIRES_IN")
 
     upload_dir: str = Field(default="backend/src/uploads", alias="UPLOAD_DIR")
     max_upload_mb: int = Field(default=15, alias="MAX_UPLOAD_MB")
@@ -63,7 +64,11 @@ class Settings(BaseSettings):
 
     @property
     def public_app_base_url(self) -> str:
-        return (self.app_public_base_url or self.client_origin).rstrip("/")
+        if self.app_public_base_url:
+            return self.app_public_base_url.rstrip("/")
+        origin = self.client_origin.rstrip("/")
+        base_path = self.app_base_path.strip("/")
+        return f"{origin}/{base_path}" if base_path else origin
 
     @property
     def upload_path(self) -> Path:

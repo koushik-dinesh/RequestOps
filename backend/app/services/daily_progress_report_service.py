@@ -1,15 +1,75 @@
 import asyncio
 import json
 from datetime import date, datetime, time
-from html import escape
 from typing import Any
 
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, execute, one, rows
+from app.services.daily_progress_report_template import render_report_html
 from app.services.email_service import send_email
 
+
+OPEN_REQUEST_STATUSES = frozenset({
+    "SUBMITTED",
+    "DEPARTMENT_APPROVAL_PENDING",
+    "CLARIFICATION_REQUESTED",
+    "IT_REVIEW_PENDING",
+    "ASSIGNMENT_PENDING",
+    "PM_ASSIGNED",
+    "SCOPE_REVIEW",
+    "USER_STORY_REVIEW",
+    "REQUIREMENTS_DEPARTMENT_REVIEW",
+    "REQUIREMENTS_PM_REVIEW",
+    "REQUIREMENTS_IT_REVIEW",
+    "REQUIREMENTS_CLARIFICATION_REQUESTED",
+    "REQUIREMENTS_APPROVED",
+    "DEVELOPER_ASSIGNED",
+    "SPRINT_PLANNING",
+    "SPRINT_CREATED",
+    "ASSIGNED",
+})
+
+IN_PROGRESS_REQUEST_STATUSES = frozenset({
+    "SPRINT_ACTIVE",
+    "IN_DEVELOPMENT",
+    "DEVELOPMENT_COMPLETE",
+    "QA_PENDING",
+    "QA_FAILED",
+    "QA_PASSED",
+    "IN_TESTING",
+    "TEST_FAILED",
+    "UAT_PENDING",
+    "UAT_FAILED",
+    "UAT_APPROVED",
+    "DEPLOYMENT_PENDING",
+})
+
+COMPLETED_REQUEST_STATUSES = frozenset({"DEPLOYED", "READY_FOR_COMPLETION"})
+
+APPROVAL_STATUS_CHANGES = frozenset({
+    "IT_REVIEW_PENDING",
+    "REQUIREMENTS_APPROVED",
+    "QA_PASSED",
+    "UAT_APPROVED",
+})
+
+ASSIGNMENT_STATUS_CHANGES = frozenset({
+    "PM_ASSIGNED",
+    "DEVELOPER_ASSIGNED",
+    "ASSIGNED",
+    "SPRINT_ACTIVE",
+    "IN_DEVELOPMENT",
+})
+
+WORK_COMPLETED_STATUS_CHANGES = frozenset({
+    "DEVELOPMENT_COMPLETE",
+    "QA_PASSED",
+    "UAT_APPROVED",
+    "DEPLOYED",
+    "READY_FOR_COMPLETION",
+})
 
 ACTIVE_REPORT_STATUSES = [
     "ASSIGNED",
@@ -72,6 +132,7 @@ PENDING_ACTIONS = {
 
 _scheduler_task: asyncio.Task | None = None
 _scheduler_stop_event: asyncio.Event | None = None
+DEFAULT_SCHEDULE_DAYS = [0, 1, 2, 3, 4, 5, 6]
 
 
 def _json_default(value: Any) -> str:
@@ -133,6 +194,33 @@ def _format_priority(priority: str | None) -> str:
     return (priority or "MEDIUM").replace("_", " ").title()
 
 
+def _parse_date(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except ValueError:
+        return None
+
+
+def _due_indicator(target_date: date | None, report_date: date) -> tuple[str, bool, bool]:
+    """Return display label, overdue flag, and due-today flag for a target date."""
+    if not target_date:
+        return "No target date", False, False
+    delta = (target_date - report_date).days
+    if delta < 0:
+        days = abs(delta)
+        label = f"{days} day{'s' if days != 1 else ''} overdue"
+        return label, True, False
+    if delta == 0:
+        return "Due today", False, True
+    return f"{delta} day{'s' if delta != 1 else ''} remaining", False, False
+
+
 def _activity_item(kind: str, label: str, actor: str | None, occurred_at: Any, detail: str | None = None) -> dict:
     return {
         "kind": kind,
@@ -143,6 +231,518 @@ def _activity_item(kind: str, label: str, actor: str | None, occurred_at: Any, d
     }
 
 
+def _quoted_status_list(statuses: frozenset[str]) -> str:
+    return ", ".join(f"'{status}'" for status in sorted(statuses))
+
+
+def _fetch_overall_status_counts(db: Session) -> dict:
+    """Overall Request Status — aggregate counts across the full request lifecycle."""
+    row = one(
+        db,
+        f"""
+        SELECT
+          COUNT(*) AS total_requests,
+          SUM(CASE WHEN status IN ({_quoted_status_list(OPEN_REQUEST_STATUSES)}) THEN 1 ELSE 0 END) AS open_requests,
+          SUM(CASE WHEN status IN ({_quoted_status_list(IN_PROGRESS_REQUEST_STATUSES)}) THEN 1 ELSE 0 END) AS in_progress_requests,
+          SUM(CASE WHEN status IN ({_quoted_status_list(COMPLETED_REQUEST_STATUSES)}) THEN 1 ELSE 0 END) AS completed_requests,
+          SUM(CASE WHEN status = 'CLOSED' THEN 1 ELSE 0 END) AS closed_requests
+        FROM requests
+        """,
+    ) or {}
+    return {
+        "totalRequests": int(row.get("total_requests") or 0),
+        "openRequests": int(row.get("open_requests") or 0),
+        "inProgressRequests": int(row.get("in_progress_requests") or 0),
+        "completedRequests": int(row.get("completed_requests") or 0),
+        "closedRequests": int(row.get("closed_requests") or 0),
+    }
+
+
+def _fetch_daily_summary_counts(db: Session, report_date: date) -> dict:
+    """Daily Summary — count lifecycle events recorded on the report date."""
+    params = {"reportDate": report_date.isoformat()}
+    submitted = one(
+        db,
+        """
+        SELECT COUNT(DISTINCT request_id) AS count
+        FROM request_status_history
+        WHERE DATE(changed_at) = :reportDate AND to_status = 'SUBMITTED'
+        """,
+        params,
+    ) or {}
+    created = one(
+        db,
+        """
+        SELECT COUNT(*) AS count
+        FROM requests
+        WHERE DATE(created_at) = :reportDate
+        """,
+        params,
+    ) or {}
+    status_rows = rows(
+        db,
+        """
+        SELECT to_status, COUNT(DISTINCT request_id) AS count
+        FROM request_status_history
+        WHERE DATE(changed_at) = :reportDate
+        GROUP BY to_status
+        """,
+        params,
+    )
+    assignment_count = one(
+        db,
+        """
+        SELECT COUNT(DISTINCT request_id) AS count
+        FROM assignments
+        WHERE DATE(assigned_at) = :reportDate OR DATE(qa_assigned_at) = :reportDate
+        """,
+        params,
+    ) or {}
+    status_map = {row["to_status"]: int(row["count"]) for row in status_rows}
+    approved = sum(status_map.get(status, 0) for status in APPROVAL_STATUS_CHANGES)
+    assigned = sum(status_map.get(status, 0) for status in ASSIGNMENT_STATUS_CHANGES)
+    assigned = max(assigned, int(assignment_count.get("count") or 0))
+    completed = sum(status_map.get(status, 0) for status in WORK_COMPLETED_STATUS_CHANGES)
+    closed = status_map.get("CLOSED", 0)
+    new_submitted = max(int(submitted.get("count") or 0), int(created.get("count") or 0))
+    return {
+        "newRequestsSubmitted": new_submitted,
+        "requestsApproved": approved,
+        "requestsAssigned": assigned,
+        "requestsCompleted": completed,
+        "requestsClosed": closed,
+    }
+
+
+def _fetch_enriched_requests(db: Session) -> list[dict]:
+    """Shared request enrichment used by pending, sprint, and legacy report sections."""
+    return rows(
+        db,
+        """
+        SELECT
+          r.id,
+          r.request_number,
+          r.title,
+          r.priority,
+          r.status,
+          r.created_at,
+          r.updated_at,
+          r.closed_at,
+          d.name AS department_name,
+          COALESCE(assignment_dev.full_name, sprint_dev.full_name) AS assigned_developer_name,
+          pm.full_name AS project_manager_name,
+          qa.full_name AS qa_name,
+          assignee_user.full_name AS current_assignee_name,
+          status_marker.last_status_at,
+          open_sprint.next_sprint_end_date,
+          open_sprint.sprint_completed_at,
+          open_task.next_task_due_date,
+          COALESCE(blocked.blocked_count, 0) AS blocked_count,
+          latest_comment.comment_text AS latest_remark
+        FROM requests r
+        LEFT JOIN departments d ON d.id = r.requester_department_id
+        LEFT JOIN users pm ON pm.id = r.project_manager_user_id
+        LEFT JOIN users assignee_user ON assignee_user.id = r.current_assignee_user_id
+        LEFT JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE
+        LEFT JOIN users assignment_dev ON assignment_dev.id = a.developer_user_id
+        LEFT JOIN users qa ON qa.id = a.qa_user_id
+        LEFT JOIN (
+          SELECT
+            s.request_id,
+            MIN(s.end_date) AS next_sprint_end_date,
+            MIN(s.assigned_developer_user_id) AS assigned_developer_user_id,
+            MAX(s.completed_at) AS sprint_completed_at
+          FROM sprints s
+          WHERE s.status NOT IN ('COMPLETED', 'CANCELLED')
+          GROUP BY s.request_id
+        ) open_sprint ON open_sprint.request_id = r.id
+        LEFT JOIN users sprint_dev ON sprint_dev.id = open_sprint.assigned_developer_user_id
+        LEFT JOIN (
+          SELECT s.request_id, MIN(t.due_date) AS next_task_due_date
+          FROM sprint_tasks t
+          JOIN sprints s ON s.id = t.sprint_id
+          WHERE t.status NOT IN ('DONE', 'CANCELLED') AND t.due_date IS NOT NULL
+          GROUP BY s.request_id
+        ) open_task ON open_task.request_id = r.id
+        LEFT JOIN (
+          SELECT request_id, to_status, MAX(changed_at) AS last_status_at
+          FROM request_status_history
+          GROUP BY request_id, to_status
+        ) status_marker ON status_marker.request_id = r.id AND status_marker.to_status = r.status
+        LEFT JOIN (
+          SELECT s.request_id, COUNT(*) AS blocked_count
+          FROM sprint_tasks t
+          JOIN sprints s ON s.id = t.sprint_id
+          WHERE t.status = 'BLOCKED'
+          GROUP BY s.request_id
+        ) blocked ON blocked.request_id = r.id
+        LEFT JOIN (
+          SELECT c.request_id, c.comment_text
+          FROM request_comments c
+          JOIN (
+            SELECT request_id, MAX(id) AS latest_id
+            FROM request_comments
+            GROUP BY request_id
+          ) latest ON latest.latest_id = c.id
+        ) latest_comment ON latest_comment.request_id = r.id
+        ORDER BY FIELD(r.priority, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), r.updated_at ASC
+        """,
+    )
+
+
+def _target_date_for_row(row: dict) -> date | None:
+    return _parse_date(row.get("next_sprint_end_date")) or _parse_date(row.get("next_task_due_date"))
+
+
+def _completed_date_for_row(row: dict) -> str:
+    if row.get("status") == "CLOSED" and row.get("closed_at"):
+        return _datetime_string(row.get("closed_at"))
+    if row.get("sprint_completed_at"):
+        return _datetime_string(row.get("sprint_completed_at"))
+    return "-"
+
+
+def _fetch_today_status_timeline(db: Session, report_date: date) -> list[dict]:
+    """Activity Log — chronological status changes across all requests today."""
+    timeline_rows = rows(
+        db,
+        """
+        SELECT
+          h.from_status,
+          h.to_status,
+          h.comment,
+          h.changed_at,
+          u.full_name AS actor_name,
+          r.request_number,
+          r.title
+        FROM request_status_history h
+        JOIN requests r ON r.id = h.request_id
+        JOIN users u ON u.id = h.changed_by_user_id
+        WHERE DATE(h.changed_at) = :reportDate
+        ORDER BY h.changed_at ASC
+        """,
+        {"reportDate": report_date.isoformat()},
+    )
+    items = []
+    for row in timeline_rows:
+        to_status = row.get("to_status")
+        from_status = row.get("from_status")
+        label = _format_status(to_status)
+        if from_status:
+            label = f"{_format_status(from_status)} → {_format_status(to_status)}"
+        items.append({
+            "requestId": row.get("request_number"),
+            "title": row.get("title"),
+            "toStatus": to_status,
+            "statusLabel": label,
+            "eventLabel": _format_status(to_status),
+            "actor": row.get("actor_name") or "System",
+            "occurredAt": _datetime_string(row.get("changed_at")),
+            "detail": row.get("comment") or "",
+        })
+    return items
+
+
+def _fetch_bulk_today_activity(db: Session, report_date: date) -> dict[int, dict]:
+    """Fetch per-request activity for the report date in bulk to avoid N+1 queries."""
+    params = {"reportDate": report_date.isoformat()}
+    grouped: dict[int, list[dict]] = {}
+
+    def add_item(request_id: int, item: dict) -> None:
+        grouped.setdefault(int(request_id), []).append(item)
+
+    status_changes = rows(
+        db,
+        """
+        SELECT h.request_id, h.from_status, h.to_status, h.comment, h.changed_at, u.full_name AS actor_name
+        FROM request_status_history h
+        JOIN users u ON u.id = h.changed_by_user_id
+        WHERE DATE(h.changed_at) = :reportDate
+        ORDER BY h.changed_at
+        """,
+        params,
+    )
+    for item in status_changes:
+        add_item(
+            int(item["request_id"]),
+            _activity_item(
+                "Status",
+                f"{_format_status(item.get('from_status'))} -> {_format_status(item.get('to_status'))}",
+                item.get("actor_name"),
+                item.get("changed_at"),
+                item.get("comment"),
+            ),
+        )
+
+    comments = rows(
+        db,
+        """
+        SELECT c.request_id, c.comment_type, c.comment_text, c.created_at, u.full_name AS actor_name
+        FROM request_comments c
+        JOIN users u ON u.id = c.user_id
+        WHERE DATE(c.created_at) = :reportDate
+        ORDER BY c.created_at
+        """,
+        params,
+    )
+    for item in comments:
+        add_item(
+            int(item["request_id"]),
+            _activity_item("Comment", _format_status(item.get("comment_type")), item.get("actor_name"), item.get("created_at"), item.get("comment_text")),
+        )
+
+    assignments = rows(
+        db,
+        """
+        SELECT a.request_id, a.assigned_at, a.qa_assigned_at, a.notes,
+               dev.full_name AS developer_name, qa.full_name AS qa_name, assigner.full_name AS actor_name
+        FROM assignments a
+        LEFT JOIN users dev ON dev.id = a.developer_user_id
+        LEFT JOIN users qa ON qa.id = a.qa_user_id
+        LEFT JOIN users assigner ON assigner.id = a.assigned_by_user_id
+        WHERE DATE(a.assigned_at) = :reportDate OR DATE(a.qa_assigned_at) = :reportDate
+        ORDER BY COALESCE(a.qa_assigned_at, a.assigned_at)
+        """,
+        params,
+    )
+    for item in assignments:
+        target = ", ".join(value for value in [item.get("developer_name"), item.get("qa_name")] if value)
+        add_item(
+            int(item["request_id"]),
+            _activity_item("Assignment", f"Assigned {target or 'delivery owner'}", item.get("actor_name"), item.get("qa_assigned_at") or item.get("assigned_at"), item.get("notes")),
+        )
+
+    development_updates = rows(
+        db,
+        """
+        SELECT du.request_id, du.progress_percentage, du.update_notes, du.created_at, u.full_name AS actor_name
+        FROM development_updates du
+        JOIN users u ON u.id = du.developer_user_id
+        WHERE DATE(du.created_at) = :reportDate
+        ORDER BY du.created_at
+        """,
+        params,
+    )
+    for item in development_updates:
+        add_item(
+            int(item["request_id"]),
+            _activity_item("Development", f"Progress updated to {item.get('progress_percentage')}%", item.get("actor_name"), item.get("created_at"), item.get("update_notes")),
+        )
+
+    qa_updates = rows(
+        db,
+        """
+        SELECT tr.request_id, tr.result, tr.test_summary, tr.defects_found, tr.tested_at, u.full_name AS actor_name
+        FROM test_results tr
+        JOIN users u ON u.id = tr.qa_user_id
+        WHERE DATE(tr.tested_at) = :reportDate
+        ORDER BY tr.tested_at
+        """,
+        params,
+    )
+    for item in qa_updates:
+        add_item(
+            int(item["request_id"]),
+            _activity_item("QA", f"QA result: {_format_status(item.get('result'))}", item.get("actor_name"), item.get("tested_at"), item.get("defects_found") or item.get("test_summary")),
+        )
+
+    uat_updates = rows(
+        db,
+        """
+        SELECT ua.request_id, ua.decision, ua.comments, ua.decided_at, u.full_name AS actor_name
+        FROM uat_approvals ua
+        JOIN users u ON u.id = ua.uat_approver_user_id
+        WHERE DATE(ua.decided_at) = :reportDate
+        ORDER BY ua.decided_at
+        """,
+        params,
+    )
+    for item in uat_updates:
+        add_item(
+            int(item["request_id"]),
+            _activity_item("UAT", f"UAT {_format_status(item.get('decision'))}", item.get("actor_name"), item.get("decided_at"), item.get("comments")),
+        )
+
+    sprint_updates = rows(
+        db,
+        """
+        SELECT s.request_id, th.from_status, th.to_status, th.comment, th.changed_at, u.full_name AS actor_name, t.title AS task_title
+        FROM sprint_task_status_history th
+        JOIN sprint_tasks t ON t.id = th.task_id
+        JOIN sprints s ON s.id = t.sprint_id
+        JOIN users u ON u.id = th.changed_by_user_id
+        WHERE DATE(th.changed_at) = :reportDate
+        ORDER BY th.changed_at
+        """,
+        params,
+    )
+    for item in sprint_updates:
+        add_item(
+            int(item["request_id"]),
+            _activity_item(
+                "Sprint Task",
+                f"{item.get('task_title')}: {_format_status(item.get('from_status'))} -> {_format_status(item.get('to_status'))}",
+                item.get("actor_name"),
+                item.get("changed_at"),
+                item.get("comment"),
+            ),
+        )
+
+    audit_logs = rows(
+        db,
+        """
+        SELECT al.entity_id AS request_id, al.action, al.created_at, u.full_name AS actor_name
+        FROM audit_logs al
+        LEFT JOIN users u ON u.id = al.actor_user_id
+        WHERE al.entity_type = 'REQUEST'
+          AND DATE(al.created_at) = :reportDate
+        ORDER BY al.created_at
+        """,
+        params,
+    )
+    for item in audit_logs:
+        add_item(
+            int(item["request_id"]),
+            _activity_item("Audit", _format_status(item.get("action")), item.get("actor_name"), item.get("created_at")),
+        )
+
+    result: dict[int, dict] = {}
+    for request_id, items in grouped.items():
+        result[request_id] = {
+            "items": items,
+            "counts": {
+                "statusChanges": sum(1 for item in items if item["kind"] == "Status"),
+                "comments": sum(1 for item in items if item["kind"] == "Comment"),
+                "assignments": sum(1 for item in items if item["kind"] == "Assignment"),
+                "developmentUpdates": sum(1 for item in items if item["kind"] == "Development"),
+                "qaUpdates": sum(1 for item in items if item["kind"] == "QA"),
+                "uatUpdates": sum(1 for item in items if item["kind"] == "UAT"),
+                "sprintUpdates": sum(1 for item in items if item["kind"] == "Sprint Task"),
+                "auditLogs": sum(1 for item in items if item["kind"] == "Audit"),
+                "total": len(items),
+            },
+        }
+    return result
+
+
+def _today_activity_from_bulk(bulk: dict[int, dict], request_id: int) -> dict:
+    return bulk.get(request_id) or {"items": [], "counts": {"total": 0, "statusChanges": 0, "comments": 0, "assignments": 0, "developmentUpdates": 0, "qaUpdates": 0, "uatUpdates": 0, "sprintUpdates": 0, "auditLogs": 0}}
+
+
+def _build_pending_requests(enriched_rows: list[dict], report_date: date) -> list[dict]:
+    """Pending Requests — all non-closed requests with due-date indicators."""
+    pending = []
+    for row in enriched_rows:
+        if row.get("status") == "CLOSED":
+            continue
+        target = _target_date_for_row(row)
+        due_label, is_overdue, due_today = _due_indicator(target, report_date)
+        pending.append({
+            "id": row["id"],
+            "requestId": row.get("request_number"),
+            "title": row.get("title"),
+            "status": row.get("status"),
+            "statusLabel": _format_status(row.get("status")),
+            "targetDate": _date_string(target),
+            "assignedDeveloper": row.get("assigned_developer_name") or "Not assigned",
+            "dueIndicator": due_label,
+            "isOverdue": is_overdue,
+            "dueToday": due_today,
+        })
+    return pending
+
+
+def _build_daily_sprint_activity(enriched_rows: list[dict], bulk_activity: dict[int, dict]) -> list[dict]:
+    """Daily Sprint Activity — requests with any recorded activity today."""
+    active_ids = {request_id for request_id, activity in bulk_activity.items() if activity["counts"]["total"] > 0}
+    items = []
+    for row in enriched_rows:
+        request_id = int(row["id"])
+        if request_id not in active_ids:
+            continue
+        remarks = row.get("latest_remark") or ""
+        activity_items = bulk_activity[request_id]["items"]
+        status_remarks = next((item.get("detail") for item in reversed(activity_items) if item.get("detail")), "")
+        items.append({
+            "id": request_id,
+            "requestId": row.get("request_number"),
+            "title": row.get("title"),
+            "status": row.get("status"),
+            "statusLabel": _format_status(row.get("status")),
+            "targetDate": _date_string(_target_date_for_row(row)),
+            "completedDate": _completed_date_for_row(row),
+            "remarks": status_remarks or remarks,
+            "todayActivity": bulk_activity[request_id],
+        })
+    return items
+
+
+def _build_sprint_health(enriched_rows: list[dict], report_date: date) -> dict:
+    """Sprint Health — delivery timeline metrics for active sprint requests."""
+    week_end = report_date.toordinal() + 7
+    delivery_complete = COMPLETED_REQUEST_STATUSES | frozenset({"CLOSED"})
+    sprint_rows = [
+        row for row in enriched_rows
+        if row.get("status") in IN_PROGRESS_REQUEST_STATUSES
+        or row.get("status") in {"SPRINT_ACTIVE", "SPRINT_CREATED", "DEVELOPER_ASSIGNED", "SPRINT_PLANNING"}
+        or row.get("next_sprint_end_date")
+    ]
+    total_active = len(sprint_rows)
+    overdue = 0
+    due_today = 0
+    due_this_week = 0
+    completed_on_time = 0
+    delivered_count = 0
+    for row in sprint_rows:
+        target = _target_date_for_row(row)
+        status = row.get("status")
+        if status in delivery_complete:
+            delivered_count += 1
+        if not target:
+            continue
+        target_ordinal = target.toordinal()
+        if target < report_date and status != "CLOSED":
+            overdue += 1
+        if target == report_date:
+            due_today += 1
+        if report_date.toordinal() <= target_ordinal <= week_end:
+            due_this_week += 1
+        closed_date = _parse_date(row.get("closed_at"))
+        if status == "CLOSED" and closed_date and closed_date <= target:
+            completed_on_time += 1
+        elif status in COMPLETED_REQUEST_STATUSES and target >= report_date:
+            completed_on_time += 1
+    completion_pct = round((delivered_count / total_active) * 100) if total_active else 0
+    return {
+        "totalActiveSprintRequests": total_active,
+        "completedWithinTargetDate": completed_on_time,
+        "overdueRequests": overdue,
+        "dueToday": due_today,
+        "dueThisWeek": due_this_week,
+        "sprintCompletionPercentage": completion_pct,
+    }
+
+
+def _normalize_schedule_days(value: Any) -> list[int]:
+    days = _json_loads(value, DEFAULT_SCHEDULE_DAYS)
+    if not isinstance(days, list):
+        return DEFAULT_SCHEDULE_DAYS.copy()
+    normalized: list[int] = []
+    for day in days:
+        try:
+            day_int = int(day)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day_int <= 6:
+            normalized.append(day_int)
+    return sorted(set(normalized)) or DEFAULT_SCHEDULE_DAYS.copy()
+
+
+def _is_scheduled_for_date(config: dict, report_date: date) -> bool:
+    """Return True when automated reports should run on the given date."""
+    return report_date.weekday() in _normalize_schedule_days(config.get("schedule_days"))
+
+
 def ensure_default_config(db: Session) -> dict:
     config = one(db, "SELECT * FROM daily_progress_report_config WHERE id = 1")
     if config:
@@ -151,9 +751,10 @@ def ensure_default_config(db: Session) -> dict:
         db,
         """
         INSERT INTO daily_progress_report_config
-          (id, is_enabled, report_time, recipient_user_ids, stale_threshold_days, overdue_threshold_days)
-        VALUES (1, TRUE, '19:00:00', NULL, 3, 7)
+          (id, is_enabled, report_time, schedule_days, recipient_user_ids, stale_threshold_days, overdue_threshold_days)
+        VALUES (1, TRUE, '19:00:00', :scheduleDays, NULL, 3, 7)
         """,
+        {"scheduleDays": _json_dumps(DEFAULT_SCHEDULE_DAYS)},
     )
     db.commit()
     return one(db, "SELECT * FROM daily_progress_report_config WHERE id = 1") or {}
@@ -164,6 +765,7 @@ def get_report_config(db: Session) -> dict:
     return {
         "isEnabled": bool(config.get("is_enabled")),
         "reportTime": _time_to_string(config.get("report_time")),
+        "scheduleDays": _normalize_schedule_days(config.get("schedule_days")),
         "recipientUserIds": _json_loads(config.get("recipient_user_ids"), []),
         "staleThresholdDays": int(config.get("stale_threshold_days") or 3),
         "overdueThresholdDays": int(config.get("overdue_threshold_days") or 7),
@@ -173,16 +775,18 @@ def get_report_config(db: Session) -> dict:
 
 def update_report_config(db: Session, payload: dict, actor_user_id: int) -> dict:
     recipient_ids = payload.get("recipientUserIds") or []
+    schedule_days = _normalize_schedule_days(payload.get("scheduleDays"))
     execute(
         db,
         """
         INSERT INTO daily_progress_report_config
-          (id, is_enabled, report_time, recipient_user_ids, stale_threshold_days, overdue_threshold_days, updated_by_user_id)
+          (id, is_enabled, report_time, schedule_days, recipient_user_ids, stale_threshold_days, overdue_threshold_days, updated_by_user_id)
         VALUES
-          (1, :isEnabled, :reportTime, :recipientUserIds, :staleThresholdDays, :overdueThresholdDays, :actorUserId)
+          (1, :isEnabled, :reportTime, :scheduleDays, :recipientUserIds, :staleThresholdDays, :overdueThresholdDays, :actorUserId)
         ON DUPLICATE KEY UPDATE
           is_enabled = VALUES(is_enabled),
           report_time = VALUES(report_time),
+          schedule_days = VALUES(schedule_days),
           recipient_user_ids = VALUES(recipient_user_ids),
           stale_threshold_days = VALUES(stale_threshold_days),
           overdue_threshold_days = VALUES(overdue_threshold_days),
@@ -191,6 +795,7 @@ def update_report_config(db: Session, payload: dict, actor_user_id: int) -> dict
         {
             "isEnabled": bool(payload.get("isEnabled", True)),
             "reportTime": payload.get("reportTime") or "19:00",
+            "scheduleDays": _json_dumps(schedule_days),
             "recipientUserIds": _json_dumps([int(value) for value in recipient_ids]) if recipient_ids else None,
             "staleThresholdDays": int(payload.get("staleThresholdDays") or 3),
             "overdueThresholdDays": int(payload.get("overdueThresholdDays") or 7),
@@ -232,200 +837,6 @@ def resolve_report_recipients(db: Session, config: dict | None = None) -> list[d
         ORDER BY FIELD(r.code, 'IT_HEAD', 'PROJECT_MANAGER'), u.full_name
         """,
     )
-
-
-def _active_requests(db: Session) -> list[dict]:
-    status_params = {f"status{index}": status for index, status in enumerate(ACTIVE_REPORT_STATUSES)}
-    status_sql = ", ".join(f":status{index}" for index, _ in enumerate(ACTIVE_REPORT_STATUSES))
-    return rows(
-        db,
-        f"""
-        SELECT
-          r.id,
-          r.request_number,
-          r.title,
-          r.priority,
-          r.status,
-          r.created_at,
-          r.updated_at,
-          d.name AS department_name,
-          COALESCE(assignment_dev.full_name, sprint_dev.full_name) AS assigned_developer_name,
-          pm.full_name AS project_manager_name,
-          qa.full_name AS qa_name,
-          assignee_user.full_name AS current_assignee_name,
-          status_marker.last_status_at,
-          open_sprint.next_sprint_end_date,
-          open_task.next_task_due_date,
-          COALESCE(blocked.blocked_count, 0) AS blocked_count
-        FROM requests r
-        LEFT JOIN departments d ON d.id = r.requester_department_id
-        LEFT JOIN users pm ON pm.id = r.project_manager_user_id
-        LEFT JOIN users assignee_user ON assignee_user.id = r.current_assignee_user_id
-        LEFT JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE
-        LEFT JOIN users assignment_dev ON assignment_dev.id = a.developer_user_id
-        LEFT JOIN users qa ON qa.id = a.qa_user_id
-        LEFT JOIN (
-          SELECT s.request_id, MIN(s.end_date) AS next_sprint_end_date, MIN(s.assigned_developer_user_id) AS assigned_developer_user_id
-          FROM sprints s
-          WHERE s.status NOT IN ('COMPLETED', 'CANCELLED')
-          GROUP BY s.request_id
-        ) open_sprint ON open_sprint.request_id = r.id
-        LEFT JOIN users sprint_dev ON sprint_dev.id = open_sprint.assigned_developer_user_id
-        LEFT JOIN (
-          SELECT s.request_id, MIN(t.due_date) AS next_task_due_date
-          FROM sprint_tasks t
-          JOIN sprints s ON s.id = t.sprint_id
-          WHERE t.status NOT IN ('DONE', 'CANCELLED') AND t.due_date IS NOT NULL
-          GROUP BY s.request_id
-        ) open_task ON open_task.request_id = r.id
-        LEFT JOIN (
-          SELECT request_id, to_status, MAX(changed_at) AS last_status_at
-          FROM request_status_history
-          GROUP BY request_id, to_status
-        ) status_marker ON status_marker.request_id = r.id AND status_marker.to_status = r.status
-        LEFT JOIN (
-          SELECT s.request_id, COUNT(*) AS blocked_count
-          FROM sprint_tasks t
-          JOIN sprints s ON s.id = t.sprint_id
-          WHERE t.status = 'BLOCKED'
-          GROUP BY s.request_id
-        ) blocked ON blocked.request_id = r.id
-        WHERE r.status IN ({status_sql})
-        ORDER BY FIELD(r.priority, 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'), r.updated_at ASC
-        """,
-        status_params,
-    )
-
-
-def _today_activity(db: Session, request_id: int, report_date: date) -> dict:
-    params = {"requestId": request_id, "reportDate": report_date.isoformat()}
-    status_changes = rows(
-        db,
-        """
-        SELECT h.from_status, h.to_status, h.comment, h.changed_at, u.full_name AS actor_name
-        FROM request_status_history h
-        JOIN users u ON u.id = h.changed_by_user_id
-        WHERE h.request_id = :requestId AND DATE(h.changed_at) = :reportDate
-        ORDER BY h.changed_at
-        """,
-        params,
-    )
-    comments = rows(
-        db,
-        """
-        SELECT c.comment_type, c.comment_text, c.created_at, u.full_name AS actor_name
-        FROM request_comments c
-        JOIN users u ON u.id = c.user_id
-        WHERE c.request_id = :requestId AND DATE(c.created_at) = :reportDate
-        ORDER BY c.created_at
-        """,
-        params,
-    )
-    assignments = rows(
-        db,
-        """
-        SELECT a.assigned_at, a.qa_assigned_at, a.notes, dev.full_name AS developer_name, qa.full_name AS qa_name, assigner.full_name AS actor_name
-        FROM assignments a
-        LEFT JOIN users dev ON dev.id = a.developer_user_id
-        LEFT JOIN users qa ON qa.id = a.qa_user_id
-        LEFT JOIN users assigner ON assigner.id = a.assigned_by_user_id
-        WHERE a.request_id = :requestId
-          AND (DATE(a.assigned_at) = :reportDate OR DATE(a.qa_assigned_at) = :reportDate)
-        ORDER BY COALESCE(a.qa_assigned_at, a.assigned_at)
-        """,
-        params,
-    )
-    development_updates = rows(
-        db,
-        """
-        SELECT du.progress_percentage, du.update_notes, du.created_at, u.full_name AS actor_name
-        FROM development_updates du
-        JOIN users u ON u.id = du.developer_user_id
-        WHERE du.request_id = :requestId AND DATE(du.created_at) = :reportDate
-        ORDER BY du.created_at
-        """,
-        params,
-    )
-    qa_updates = rows(
-        db,
-        """
-        SELECT tr.result, tr.test_summary, tr.defects_found, tr.tested_at, u.full_name AS actor_name
-        FROM test_results tr
-        JOIN users u ON u.id = tr.qa_user_id
-        WHERE tr.request_id = :requestId AND DATE(tr.tested_at) = :reportDate
-        ORDER BY tr.tested_at
-        """,
-        params,
-    )
-    uat_updates = rows(
-        db,
-        """
-        SELECT ua.decision, ua.comments, ua.decided_at, u.full_name AS actor_name
-        FROM uat_approvals ua
-        JOIN users u ON u.id = ua.uat_approver_user_id
-        WHERE ua.request_id = :requestId AND DATE(ua.decided_at) = :reportDate
-        ORDER BY ua.decided_at
-        """,
-        params,
-    )
-    sprint_updates = rows(
-        db,
-        """
-        SELECT th.from_status, th.to_status, th.comment, th.changed_at, u.full_name AS actor_name, t.title AS task_title
-        FROM sprint_task_status_history th
-        JOIN sprint_tasks t ON t.id = th.task_id
-        JOIN sprints s ON s.id = t.sprint_id
-        JOIN users u ON u.id = th.changed_by_user_id
-        WHERE s.request_id = :requestId AND DATE(th.changed_at) = :reportDate
-        ORDER BY th.changed_at
-        """,
-        params,
-    )
-    audit_logs = rows(
-        db,
-        """
-        SELECT al.action, al.created_at, u.full_name AS actor_name
-        FROM audit_logs al
-        LEFT JOIN users u ON u.id = al.actor_user_id
-        WHERE al.entity_type = 'REQUEST'
-          AND al.entity_id = :requestId
-          AND DATE(al.created_at) = :reportDate
-        ORDER BY al.created_at
-        """,
-        params,
-    )
-    items = []
-    for item in status_changes:
-        items.append(_activity_item("Status", f"{_format_status(item.get('from_status'))} -> {_format_status(item.get('to_status'))}", item.get("actor_name"), item.get("changed_at"), item.get("comment")))
-    for item in comments:
-        items.append(_activity_item("Comment", _format_status(item.get("comment_type")), item.get("actor_name"), item.get("created_at"), item.get("comment_text")))
-    for item in assignments:
-        target = ", ".join(value for value in [item.get("developer_name"), item.get("qa_name")] if value)
-        items.append(_activity_item("Assignment", f"Assigned {target or 'delivery owner'}", item.get("actor_name"), item.get("qa_assigned_at") or item.get("assigned_at"), item.get("notes")))
-    for item in development_updates:
-        items.append(_activity_item("Development", f"Progress updated to {item.get('progress_percentage')}%", item.get("actor_name"), item.get("created_at"), item.get("update_notes")))
-    for item in qa_updates:
-        items.append(_activity_item("QA", f"QA result: {_format_status(item.get('result'))}", item.get("actor_name"), item.get("tested_at"), item.get("defects_found") or item.get("test_summary")))
-    for item in uat_updates:
-        items.append(_activity_item("UAT", f"UAT {_format_status(item.get('decision'))}", item.get("actor_name"), item.get("decided_at"), item.get("comments")))
-    for item in sprint_updates:
-        items.append(_activity_item("Sprint Task", f"{item.get('task_title')}: {_format_status(item.get('from_status'))} -> {_format_status(item.get('to_status'))}", item.get("actor_name"), item.get("changed_at"), item.get("comment")))
-    for item in audit_logs:
-        items.append(_activity_item("Audit", _format_status(item.get("action")), item.get("actor_name"), item.get("created_at")))
-    return {
-        "items": items,
-        "counts": {
-            "statusChanges": len(status_changes),
-            "comments": len(comments),
-            "assignments": len(assignments),
-            "developmentUpdates": len(development_updates),
-            "qaUpdates": len(qa_updates),
-            "uatUpdates": len(uat_updates),
-            "sprintUpdates": len(sprint_updates),
-            "auditLogs": len(audit_logs),
-            "total": len(items),
-        },
-    }
 
 
 def _pending_action(row: dict) -> dict:
@@ -509,10 +920,22 @@ def build_report_payload(db: Session, report_date: date, config: dict | None = N
     config = config or ensure_default_config(db)
     stale_threshold = int(config.get("stale_threshold_days") or 3)
     overdue_threshold = int(config.get("overdue_threshold_days") or 7)
-    request_rows = _active_requests(db)
+
+    # Section data — fetched with shared queries to avoid duplicate lookups.
+    overall_status = _fetch_overall_status_counts(db)
+    daily_summary = _fetch_daily_summary_counts(db, report_date)
+    enriched_rows = _fetch_enriched_requests(db)
+    bulk_activity = _fetch_bulk_today_activity(db, report_date)
+    activity_log = _fetch_today_status_timeline(db, report_date)
+    pending_requests = _build_pending_requests(enriched_rows, report_date)
+    daily_sprint_activity = _build_daily_sprint_activity(enriched_rows, bulk_activity)
+    sprint_health = _build_sprint_health(enriched_rows, report_date)
+
+    # Legacy request breakdown — active pipeline requests for UI compatibility.
+    active_rows = [row for row in enriched_rows if row.get("status") in ACTIVE_REPORT_STATUSES]
     report_requests = []
-    for row in request_rows:
-        activity = _today_activity(db, int(row["id"]), report_date)
+    for row in active_rows:
+        activity = _today_activity_from_bulk(bulk_activity, int(row["id"]))
         highlights = _request_highlights(row, activity["counts"]["total"], report_date, stale_threshold, overdue_threshold)
         report_requests.append({
             "id": row["id"],
@@ -527,10 +950,13 @@ def build_report_payload(db: Session, report_date: date, config: dict | None = N
             "statusLabel": _format_status(row.get("status")),
             "createdDate": _date_string(row.get("created_at")),
             "lastUpdatedDate": _datetime_string(row.get("updated_at")),
+            "targetDate": _date_string(_target_date_for_row(row)),
+            "completedDate": _completed_date_for_row(row),
             "todayActivity": activity,
             "pendingAction": _pending_action(row),
             "highlights": highlights,
         })
+
     summary = {
         "totalActiveRequests": len(report_requests),
         "requestsUpdatedToday": sum(1 for item in report_requests if item["todayActivity"]["counts"]["total"] > 0),
@@ -539,6 +965,7 @@ def build_report_payload(db: Session, report_date: date, config: dict | None = N
         "highPriorityRequests": sum(1 for item in report_requests if item["priority"] in ("HIGH", "CRITICAL")),
         "overdueRequests": sum(1 for item in report_requests if "Overdue Request" in item["highlights"]),
     }
+
     risks = []
     for risk_label in ["Overdue Request", "Stale Request", "No Activity Today", "Blocked / Waiting", "High Priority"]:
         matching = [request for request in report_requests if risk_label in request["highlights"]]
@@ -548,109 +975,23 @@ def build_report_payload(db: Session, report_date: date, config: dict | None = N
                 "count": len(matching),
                 "requests": [request["requestId"] for request in matching[:8]],
             })
+
+    generated_at = datetime.now()
     return {
         "reportDate": report_date.isoformat(),
-        "generatedAt": datetime.now().isoformat(),
+        "reportDateLabel": report_date.strftime("%d %b %Y"),
+        "generatedAt": generated_at.isoformat(),
+        "generatedAtLabel": generated_at.strftime("%d %b %Y, %I:%M %p"),
+        "overallStatus": overall_status,
+        "dailySummary": daily_summary,
+        "dailySprintActivity": daily_sprint_activity,
+        "activityLog": activity_log,
+        "pendingRequests": pending_requests,
+        "sprintHealth": sprint_health,
         "summary": summary,
         "requests": report_requests,
         "keyRisks": risks,
     }
-
-
-def render_report_html(payload: dict) -> str:
-    summary = payload["summary"]
-    cards = [
-        ("Total Active Requests", summary["totalActiveRequests"]),
-        ("Updated Today", summary["requestsUpdatedToday"]),
-        ("No Activity Today", summary["requestsWithNoActivityToday"]),
-        ("Pending Action", summary["requestsPendingAction"]),
-        ("High Priority", summary["highPriorityRequests"]),
-        ("Overdue", summary["overdueRequests"]),
-    ]
-    card_cells = [
-        f"""
-        <td style="width:33.33%;padding:6px;">
-          <div style="border:1px solid #dbe4f0;border-radius:14px;padding:14px;background:#f8fafc;">
-            <div style="font-size:11px;color:#64748b;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">{escape(label)}</div>
-            <div style="margin-top:8px;font-size:24px;line-height:1;font-weight:900;color:#0f172a;">{value}</div>
-          </div>
-        </td>
-        """
-        for label, value in cards
-    ]
-    rows_html = ""
-    for request in payload["requests"]:
-        activity_items = request["todayActivity"]["items"][:4]
-        activity_html = "<br />".join(
-            f"<strong>{escape(item['kind'])}</strong>: {escape(item['label'])} <span style=\"color:#64748b;\">({escape(item['actor'])})</span>"
-            for item in activity_items
-        ) or '<span style="color:#b45309;font-weight:800;">No activity recorded today</span>'
-        if request["todayActivity"]["counts"]["total"] > 4:
-            activity_html += f"<br /><span style=\"color:#64748b;\">+{request['todayActivity']['counts']['total'] - 4} more activity item(s)</span>"
-        highlight_html = " ".join(
-            f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:4px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:800;">{escape(label)}</span>'
-            for label in request["highlights"]
-        )
-        rows_html += f"""
-        <tr>
-          <td style="padding:14px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;">
-            <div style="font-weight:900;color:#0f172a;">{escape(request['requestId'] or '-')}</div>
-            <div style="margin-top:3px;color:#334155;">{escape(request['title'] or '-')}</div>
-            <div style="margin-top:5px;color:#64748b;font-size:12px;">{escape(request['department'])}</div>
-          </td>
-          <td style="padding:14px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;">
-            <div style="font-weight:800;color:#0f172a;">{escape(request['statusLabel'])}</div>
-            <div style="margin-top:5px;color:#64748b;font-size:12px;">Priority: {escape(request['priorityLabel'])}</div>
-            <div style="margin-top:5px;color:#64748b;font-size:12px;">Updated: {escape(request['lastUpdatedDate'])}</div>
-          </td>
-          <td style="padding:14px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;">
-            <div style="font-size:12px;color:#334155;">{activity_html}</div>
-          </td>
-          <td style="padding:14px 12px;border-bottom:1px solid #e2e8f0;vertical-align:top;">
-            <div style="font-weight:800;color:#0f172a;">{escape(request['pendingAction']['nextResponsiblePerson'])}</div>
-            <div style="margin-top:5px;color:#64748b;font-size:12px;">{escape(request['pendingAction']['currentBottleneck'])}</div>
-            <div style="margin-top:8px;">{highlight_html}</div>
-          </td>
-        </tr>
-        """
-    risks_html = "".join(
-        f"""
-        <li style="margin:0 0 8px;color:#334155;">
-          <strong>{escape(risk['label'])}</strong>: {risk['count']} request(s)
-          <span style="color:#64748b;">{escape(', '.join(risk['requests']))}</span>
-        </li>
-        """
-        for risk in payload["keyRisks"]
-    ) or '<li style="color:#16a34a;font-weight:800;">No major risks identified for active requests.</li>'
-    return f"""
-    <div style="font-family:Arial,Helvetica,sans-serif;">
-      <p style="margin:0 0 16px;color:#334155;font-size:14px;line-height:1.6;">
-        Daily consolidated progress report for <strong>{escape(payload['reportDate'])}</strong>. This report is automatically generated from RequestOps workflow, assignment, activity, and audit data.
-      </p>
-
-      <h2 style="margin:22px 0 10px;color:#0f172a;font-size:18px;">Executive Summary</h2>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        <tr>{''.join(card_cells[:3])}</tr>
-        <tr>{''.join(card_cells[3:])}</tr>
-      </table>
-
-      <h2 style="margin:26px 0 10px;color:#0f172a;font-size:18px;">Request Breakdown</h2>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
-        <thead>
-          <tr style="background:#f1f5f9;">
-            <th align="left" style="padding:10px 12px;color:#475569;font-size:11px;text-transform:uppercase;">Request</th>
-            <th align="left" style="padding:10px 12px;color:#475569;font-size:11px;text-transform:uppercase;">Status</th>
-            <th align="left" style="padding:10px 12px;color:#475569;font-size:11px;text-transform:uppercase;">Today's Activity</th>
-            <th align="left" style="padding:10px 12px;color:#475569;font-size:11px;text-transform:uppercase;">Pending Action</th>
-          </tr>
-        </thead>
-        <tbody>{rows_html}</tbody>
-      </table>
-
-      <h2 style="margin:26px 0 10px;color:#0f172a;font-size:18px;">Key Risks & Bottlenecks</h2>
-      <ul style="margin:0;padding-left:18px;">{risks_html}</ul>
-    </div>
-    """
 
 
 def _insert_report(db: Session, payload: dict, html_body: str, recipients: list[dict], source: str, actor_user_id: int | None) -> dict:
@@ -715,8 +1056,8 @@ def send_report_email(db: Session, report: dict, recipients: list[dict] | None =
         try:
             send_email(
                 recipient_email,
-                f"RequestOps Daily Progress Report - {payload.get('reportDate', report.get('report_date'))}",
-                "Your RequestOps daily progress report is attached below in HTML format.",
+                f"RequestOps Daily Activity Report - {payload.get('reportDateLabel') or payload.get('reportDate', report.get('report_date'))}",
+                "Your RequestOps daily activity dashboard report is attached below in HTML format.",
                 html_body,
             )
             execute(
@@ -843,9 +1184,9 @@ async def _scheduler_loop(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
             with SessionLocal() as db:
+                now = datetime.now()
                 config = ensure_default_config(db)
-                if bool(config.get("is_enabled")):
-                    now = datetime.now()
+                if bool(config.get("is_enabled")) and _is_scheduled_for_date(config, now.date()):
                     report_time = config.get("report_time")
                     if isinstance(report_time, time):
                         due_time = report_time

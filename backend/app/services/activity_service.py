@@ -258,18 +258,21 @@ def notify(
     body = email_body or _default_request_email_text(title=title, message=message, request_row=request_email_context)
     html_body = email_html_body if email_html_body is not None else _default_request_email_html(title=title, message=message, request_row=request_email_context)
     def send() -> None:
-        if audit_email:
-            _send_email_with_audit(
-                to_email=email,
-                subject=subject,
-                body=body,
-                html_body=html_body,
-                actor_user_id=email_actor_user_id,
-                recipient_user_id=recipient_user_id,
-                request_id=request_id,
-            )
-            return
-        send_email(email, subject, body, html_body)
+        try:
+            if audit_email:
+                _send_email_with_audit(
+                    to_email=email,
+                    subject=subject,
+                    body=body,
+                    html_body=html_body,
+                    actor_user_id=email_actor_user_id,
+                    recipient_user_id=recipient_user_id,
+                    request_id=request_id,
+                )
+                return
+            send_email(email, subject, body, html_body)
+        except Exception as exc:
+            print(f"[RequestOps] Notification email failed for user {recipient_user_id}: {exc}")
 
     if background_tasks:
         background_tasks.add_task(send)

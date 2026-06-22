@@ -145,6 +145,40 @@ const manualByRole = {
       ...baseSections,
     ],
   },
+  PROJECT_MANAGER: {
+    title: 'Project Manager Manual',
+    subtitle: 'Own scope, user stories, sprint planning, developer coordination, and delivery tracking.',
+    sections: [
+      {
+        id: 'project-manager-actions',
+        title: 'What Can I Do?',
+        summary: 'Actions available to Project Managers.',
+        items: [
+          'Review assigned requests',
+          'Define scope and user stories',
+          'Plan and manage sprints',
+          'Assign developers to sprint tasks',
+          'Track delivery progress and blockers',
+          'Submit work for QA and requester testing',
+          'Complete deployment and closure steps',
+        ],
+      },
+      {
+        id: 'project-manager-workflow',
+        title: 'Typical Workflow',
+        summary: 'Common delivery path for assigned projects.',
+        steps: [
+          'Project Manager assigned',
+          'Scope and user story planning',
+          'Requirements approval',
+          'Sprint planning and execution',
+          'QA and requester testing',
+          'Deployment and sign-off',
+        ],
+      },
+      ...baseSections,
+    ],
+  },
   DEVELOPER: {
     title: 'Developer Manual',
     subtitle: 'Work through assigned requests, update progress, and provide implementation evidence.',
