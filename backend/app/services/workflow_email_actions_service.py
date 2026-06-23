@@ -186,7 +186,7 @@ def _actions_for_role(db: Session, request_row: dict, role_code: str, user_id: i
             add("qa-fail", "Reject", "error")
 
     if status == "QA_PASSED" and (role_code == "PROJECT_MANAGER" or is_admin):
-        add("send-requester-testing", "Send To Requester Testing", "success")
+        add("send-requester-testing", "Send To Pre-Deployment UAT", "success")
 
     if status == "UAT_PENDING" and (is_admin or _is_requester(request_row, user_id)):
         add("uat-approve", "Approve User Testing", "success")

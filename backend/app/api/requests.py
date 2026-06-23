@@ -1658,20 +1658,18 @@ def update_scope(request_id: int, scope_id: int, payload: ProjectScopePayload, r
     return ok(updated)
 
 
+PLANNING_PACKAGE_SUBMIT_MESSAGE = (
+    "Scope and user stories must be submitted together. "
+    "Create at least one user story, then use Submit For Department Review."
+)
+
+
 @router.post("/{request_id}/scopes/{scope_id}/submit")
 def submit_scope(request_id: int, scope_id: int, request_context: FastAPIRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     request_row = assert_request_access(db, user, request_id, ["PROJECT_MANAGER"])
     assert_can_act_as_project_manager(user, request_row)
-    scope = assert_scope_belongs_to_request(db, scope_id, request_row["id"])
-    if scope["status"] == "APPROVED":
-        raise ApiError(409, "Approved scope definitions cannot be resubmitted.")
-    execute(db, "UPDATE project_scopes SET status = 'SUBMITTED' WHERE id = :scopeId", {"scopeId": scope_id})
-    head_id = get_request_department_head_id(db, request_row)
-    updated = transition_request(db, request_id=request_row["id"], to_status="SCOPE_REVIEW", actor_user_id=user["id"], comment=f"Scope submitted: {scope['scope_title']}.", request_context=request_context, patch={"current_assignee_user_id": head_id})
-    notify(db, recipient_user_id=head_id, request_id=request_row["id"], type="SCOPE_SUBMITTED", title="Scope submitted", message=f"{request_row['request_number']} has a submitted scope definition for Department HOD review.", background_tasks=background_tasks)
-    audit(db, actor_user_id=user["id"], action="PROJECT_SCOPE_SUBMITTED", entity_type="PROJECT_SCOPE", entity_id=scope_id, new_value={"status": "SUBMITTED"}, request=request_context)
-    db.commit()
-    return ok(updated)
+    assert_scope_belongs_to_request(db, scope_id, request_row["id"])
+    raise ApiError(409, PLANNING_PACKAGE_SUBMIT_MESSAGE)
 
 
 @router.post("/{request_id}/planning/submit")
@@ -2171,38 +2169,15 @@ def delete_story(request_id: int, story_id: int, request_context: FastAPIRequest
 def submit_stories(request_id: int, request_context: FastAPIRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     request_row = assert_request_access(db, user, request_id, ["PROJECT_MANAGER"])
     assert_can_act_as_project_manager(user, request_row)
-    ensure_approved_scope(db, request_row["id"])
-    stories = list_user_stories(db, request_row["id"])
-    if not stories:
-        raise ApiError(409, "At least one user story is required before submitting for Department HOD review.")
-    execute(db, """
-        UPDATE user_stories
-        SET status = 'SUBMITTED'
-        WHERE request_id = :requestId AND status IN ('DRAFT', 'REWORK_REQUIRED')
-    """, {"requestId": request_row["id"]})
-    head_id = get_request_department_head_id(db, request_row)
-    updated = transition_request(db, request_id=request_row["id"], to_status="USER_STORY_REVIEW", actor_user_id=user["id"], comment="User stories submitted for Department HOD review.", request_context=request_context, patch={"current_assignee_user_id": head_id})
-    notify(db, recipient_user_id=head_id, request_id=request_row["id"], type="USER_STORIES_REVIEW_PENDING", title="User stories awaiting review", message=f"{request_row['request_number']} has user stories awaiting Department HOD review.", background_tasks=background_tasks)
-    audit(db, actor_user_id=user["id"], action="USER_STORIES_SUBMITTED", entity_type="REQUEST", entity_id=request_row["id"], new_value={"storyCount": len(stories)}, request=request_context)
-    db.commit()
-    return ok(updated)
+    raise ApiError(409, PLANNING_PACKAGE_SUBMIT_MESSAGE)
 
 
 @router.post("/{request_id}/user-stories/{story_id}/submit")
 def submit_story(request_id: int, story_id: int, request_context: FastAPIRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
     request_row = assert_request_access(db, user, request_id, ["PROJECT_MANAGER"])
     assert_can_act_as_project_manager(user, request_row)
-    ensure_approved_scope(db, request_row["id"])
-    story = assert_story_belongs_to_request(db, story_id, request_row["id"])
-    if story["status"] == "APPROVED":
-        raise ApiError(409, "Approved user stories cannot be resubmitted.")
-    execute(db, "UPDATE user_stories SET status = 'SUBMITTED' WHERE id = :storyId", {"storyId": story_id})
-    head_id = get_request_department_head_id(db, request_row)
-    updated = transition_request(db, request_id=request_row["id"], to_status="USER_STORY_REVIEW", actor_user_id=user["id"], comment=f"User story submitted for Department HOD review: {story['title']}.", request_context=request_context, patch={"current_assignee_user_id": head_id})
-    notify(db, recipient_user_id=head_id, request_id=request_row["id"], type="USER_STORY_REVIEW_PENDING", title="User story awaiting review", message=f"{request_row['request_number']} has a user story awaiting review.", background_tasks=background_tasks)
-    audit(db, actor_user_id=user["id"], action="USER_STORY_SUBMITTED", entity_type="USER_STORY", entity_id=story_id, old_value=story, new_value={"status": "SUBMITTED"}, request=request_context)
-    db.commit()
-    return ok(updated)
+    assert_story_belongs_to_request(db, story_id, request_row["id"])
+    raise ApiError(409, PLANNING_PACKAGE_SUBMIT_MESSAGE)
 
 
 def process_story_review(request_id: int, story_id: int, decision: str, review_comments: str | None, request_context: FastAPIRequest, background_tasks: BackgroundTasks, user: dict, db: Session):

@@ -24,243 +24,406 @@ import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
 import { roleLabels } from '../utils/constants';
 
-const statusGuide = [
-  { status: 'Draft', description: 'Request is being prepared and not yet submitted.' },
-  { status: 'Submitted', description: 'Request has been submitted for approval.' },
-  { status: 'Department Approved', description: 'Department Head approved the request.' },
-  { status: 'IT Review', description: 'IT team is evaluating feasibility and requirements.' },
-  { status: 'Assigned', description: 'Request has been assigned to a developer or team.' },
-  { status: 'In Analysis', description: 'Requirements are being analyzed.' },
-  { status: 'In Development', description: 'Development work is in progress.' },
-  { status: 'Testing', description: 'Testing activities are underway.' },
-  { status: 'Deployed', description: 'Solution has been deployed.' },
-  { status: 'Closed', description: 'Request has been completed and accepted.' },
-  { status: 'Rejected', description: 'Request has been rejected.' },
-  { status: 'Deferred', description: 'Request has been postponed for future consideration.' },
-];
-
-const workflowStages = [
-  'Draft',
-  'Submitted',
-  'Department Approved',
-  'IT Review',
-  'Assigned',
-  'In Analysis',
-  'In Development',
-  'Testing',
-  'Deployed',
-  'Closed',
-];
-
 const alternateEndStates = [
   { label: 'Rejected', tone: 'error', description: 'Request is stopped because it cannot proceed.' },
-  { label: 'Deferred', tone: 'warning', description: 'Request is postponed for future consideration.' },
+  { label: 'Withdrawn', tone: 'warning', description: 'The original requester withdrew the request before sign-off.' },
 ];
 
-const baseSections = [
-  {
+function workflowSection({ summary, stages }) {
+  return {
     id: 'workflow',
     title: 'Workflow Visualization',
-    summary: 'Understand the standard request lifecycle and alternate end states.',
+    summary,
     type: 'workflow',
-  },
-  {
+    stages,
+    alternateEndStates,
+  };
+}
+
+function statusGuideSection({ summary, rows }) {
+  return {
     id: 'status-guide',
     title: 'Request Status Guide',
-    summary: 'Use this table to understand what each request status means.',
+    summary,
     type: 'statusGuide',
-  },
-];
+    rows,
+  };
+}
 
 const manualByRole = {
   EMPLOYEE: {
     title: 'Employee Manual',
-    subtitle: 'Create requests, track progress, and collaborate with approvers and delivery teams.',
+    subtitle: 'Create requests, track progress, perform pre-deployment UAT, and sign off completed work.',
+    workflowSnapshot: ['Submitted', 'Department Approved', 'IT Review', 'In Development', 'Review & Validation', 'Requester UAT for Pre-Deployment'],
     sections: [
       {
         id: 'employee-actions',
         title: 'What Can I Do?',
         summary: 'Daily actions available to employees.',
         items: [
-          'Create new requests',
-          'View my requests',
-          'Edit draft requests',
-          'Track request progress',
+          'Create and submit new requests',
+          'View and track my requests',
+          'Edit draft requests before submission',
           'Add comments and attachments',
-          'Close completed requests',
+          'Withdraw my request while it is still in progress',
+          'Perform Requester UAT for Pre-Deployment when prompted',
+          'Confirm sign-off after final deployment',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'Lifecycle of a request you submit, from intake through sign-off.',
+        stages: [
+          { label: 'Submitted', description: 'You submit the request for department approval.' },
+          { label: 'Department Approved', description: 'Your department head approves and forwards the request to IT.' },
+          { label: 'IT Review', description: 'IT evaluates feasibility and prioritizes the work.' },
+          { label: 'Assigned & In Development', description: 'A delivery team implements the solution.' },
+          { label: 'Review & Validation', description: 'QA validates the build before you test it.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'You validate the deployed solution before final production release.' },
+          { label: 'Final Deployment Pending', description: 'IT completes the final production deployment.' },
+          { label: 'Sign-Off', description: 'You confirm acceptance and the request is closed.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses you are most likely to see on your own requests.',
+        rows: [
+          { status: 'Submitted', description: 'Waiting for department head approval.' },
+          { status: 'Department Approval Pending', description: 'Your department head has not yet decided.' },
+          { status: 'IT Review Pending', description: 'IT is evaluating feasibility and scope.' },
+          { status: 'In Development', description: 'Delivery work is underway.' },
+          { status: 'Review & Validation', description: 'QA is validating the implementation.' },
+          { status: 'Requester UAT for Pre-Deployment', description: 'Your turn to test the deployed solution before final release.' },
+          { status: 'Final Deployment Pending', description: 'Awaiting final production deployment after your UAT.' },
+          { status: 'Sign-Off', description: 'Request is closed after your final confirmation.' },
+          { status: 'Withdrawn', description: 'You withdrew the request; no further action is required.' },
+        ],
+      }),
     ],
   },
   DEPARTMENT_HEAD: {
     title: 'Department Head Manual',
-    subtitle: 'Review department submissions, make approval decisions, and track implementation.',
+    subtitle: 'Review department submissions, approve or reject requests, and monitor delivery through sign-off.',
+    workflowSnapshot: ['Submitted', 'Department Approval', 'IT Review', 'In Development', 'Sign-Off'],
     sections: [
       {
         id: 'department-head-actions',
         title: 'What Can I Do?',
         summary: 'Actions available to department approvers.',
         items: [
-          'Review submitted requests',
-          'Approve requests',
-          'Reject requests',
-          'Request clarification',
-          'View all requests from my department',
-          'Close completed requests',
+          'Review submitted requests from my department',
+          'Approve, reject, or request clarification',
+          'Monitor implementation progress for approved requests',
+          'View department request volume and status on the dashboard',
         ],
       },
       {
         id: 'approval-process',
         title: 'Approval Process',
-        summary: 'Standard department approval flow.',
+        summary: 'Your role in the department approval gate.',
         steps: [
-          'Employee submits request',
-          'Department Head reviews request',
-          'Approve, Reject, or Request Clarification',
-          'Track implementation progress',
-          'Close request after successful deployment',
+          'Employee submits a request',
+          'You review scope, priority, and business justification',
+          'Approve to send to IT review, reject to stop, or request clarification',
+          'Track progress through delivery, pre-deployment UAT, and sign-off',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'Where department approval fits in the overall lifecycle.',
+        stages: [
+          { label: 'Submitted', description: 'Request awaits your decision.' },
+          { label: 'Department Approved', description: 'You approved; request moves to IT review.' },
+          { label: 'IT Review & Assignment', description: 'IT evaluates and assigns delivery resources.' },
+          { label: 'Delivery & QA', description: 'Team builds and validates the solution.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'Requester validates before final deployment.' },
+          { label: 'Sign-Off', description: 'Requester confirms completion; request closes.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses relevant when approving and tracking department requests.',
+        rows: [
+          { status: 'Department Approval Pending', description: 'Awaiting your approve, reject, or clarification decision.' },
+          { status: 'Clarification Requested', description: 'You asked the requester for more information.' },
+          { status: 'IT Review Pending', description: 'Approved by you; IT is reviewing feasibility.' },
+          { status: 'Department Rejected', description: 'You rejected the request at the department gate.' },
+          { status: 'In Development', description: 'Approved request is being implemented.' },
+          { status: 'Requester UAT for Pre-Deployment', description: 'Requester is validating before final deployment.' },
+          { status: 'Sign-Off', description: 'Request completed and closed.' },
+        ],
+      }),
     ],
   },
   IT_HEAD: {
     title: 'IT Manager Manual',
-    subtitle: 'Evaluate feasibility, prioritize approved requests, and coordinate delivery resources.',
+    subtitle: 'Evaluate feasibility, assign resources, oversee delivery, and coordinate final deployment.',
+    workflowSnapshot: ['IT Review', 'Assignment', 'In Development', 'Final Deployment Pending', 'Sign-Off'],
     sections: [
       {
         id: 'it-manager-actions',
         title: 'What Can I Do?',
         summary: 'Actions available to IT Heads and IT Managers.',
         items: [
-          'Review approved requests',
-          'Evaluate feasibility',
-          'Assign resources',
-          'Set priorities',
-          'Monitor development progress',
-          'Manage workloads',
+          'Review department-approved requests for feasibility',
+          'Approve, reject, defer, or request clarification',
+          'Assign project managers and delivery teams',
+          'Monitor workloads, progress, and blockers',
+          'Coordinate final deployment after requester pre-deployment UAT',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'IT ownership from internal review through final deployment.',
+        stages: [
+          { label: 'IT Review', description: 'Assess feasibility, effort, and priority.' },
+          { label: 'Assignment', description: 'Assign PM, developers, and QA.' },
+          { label: 'Planning & Development', description: 'Scope, sprints, and implementation.' },
+          { label: 'Review & Validation', description: 'QA validates before requester UAT.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'Requester validates the deployed build.' },
+          { label: 'Final Deployment Pending', description: 'Production release after UAT approval.' },
+          { label: 'Sign-Off', description: 'Requester confirms; request closes.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses you manage during internal review and delivery oversight.',
+        rows: [
+          { status: 'IT Review Pending', description: 'Awaiting your feasibility decision.' },
+          { status: 'Assignment Pending', description: 'Approved; waiting for team assignment.' },
+          { status: 'Assigned', description: 'Delivery team assigned; work can begin.' },
+          { status: 'In Development', description: 'Active implementation in progress.' },
+          { status: 'Review & Validation', description: 'QA review before requester UAT.' },
+          { status: 'Final Deployment Pending', description: 'Ready for final production deployment.' },
+          { status: 'Sign-Off', description: 'Request closed after requester confirmation.' },
+          { status: 'IT Rejected', description: 'Rejected during IT review.' },
+        ],
+      }),
     ],
   },
   PROJECT_MANAGER: {
     title: 'Project Manager Manual',
-    subtitle: 'Own scope, user stories, sprint planning, developer coordination, and delivery tracking.',
+    subtitle: 'Own scope, sprint planning, developer coordination, QA handoff, and deployment readiness.',
+    workflowSnapshot: ['Assigned', 'Sprint Planning', 'In Development', 'QA', 'Pre-Deployment UAT'],
     sections: [
       {
         id: 'project-manager-actions',
         title: 'What Can I Do?',
         summary: 'Actions available to Project Managers.',
         items: [
-          'Review assigned requests',
-          'Define scope and user stories',
-          'Plan and manage sprints',
-          'Assign developers to sprint tasks',
-          'Track delivery progress and blockers',
-          'Submit work for QA and requester testing',
-          'Complete deployment and closure steps',
+          'Define scope, user stories, and acceptance criteria',
+          'Plan and manage sprints and task assignments',
+          'Track delivery progress and remove blockers',
+          'Submit work for QA and requester pre-deployment UAT',
+          'Mark deployment readiness after UAT approval',
         ],
       },
       {
         id: 'project-manager-workflow',
-        title: 'Typical Workflow',
-        summary: 'Common delivery path for assigned projects.',
+        title: 'Typical Delivery Path',
+        summary: 'Common path for requests assigned to you.',
         steps: [
-          'Project Manager assigned',
-          'Scope and user story planning',
-          'Requirements approval',
-          'Sprint planning and execution',
-          'QA and requester testing',
-          'Deployment and sign-off',
+          'Receive assignment from IT Head',
+          'Plan scope, user stories, and sprints',
+          'Coordinate development and QA',
+          'Support requester UAT for Pre-Deployment',
+          'Prepare for final deployment and sign-off',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'Delivery workflow from assignment through deployment readiness.',
+        stages: [
+          { label: 'Assigned', description: 'You own delivery for this request.' },
+          { label: 'Scope & Sprint Planning', description: 'Break down work and schedule sprints.' },
+          { label: 'In Development', description: 'Developers implement sprint tasks.' },
+          { label: 'Review & Validation', description: 'QA validates the build.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'Requester tests before final release.' },
+          { label: 'Final Deployment Pending', description: 'Awaiting production deployment.' },
+          { label: 'Sign-Off', description: 'Requester confirms completion.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses you update and monitor during delivery.',
+        rows: [
+          { status: 'Assigned', description: 'Ready for planning and sprint setup.' },
+          { status: 'Sprint Active', description: 'A sprint is in progress.' },
+          { status: 'In Development', description: 'Implementation work is underway.' },
+          { status: 'Development Complete', description: 'Build ready for QA.' },
+          { status: 'Review & Validation', description: 'QA is testing the deliverable.' },
+          { status: 'Requester UAT for Pre-Deployment', description: 'Requester is performing pre-deployment validation.' },
+          { status: 'Final Deployment Pending', description: 'UAT passed; awaiting production deploy.' },
+          { status: 'Sign-Off', description: 'Delivery complete; request closed.' },
+        ],
+      }),
     ],
   },
   DEVELOPER: {
     title: 'Developer Manual',
-    subtitle: 'Work through assigned requests, update progress, and provide implementation evidence.',
+    subtitle: 'Execute assigned sprint tasks, update progress, and hand off completed work for review.',
+    workflowSnapshot: ['Assigned', 'Sprint Tasks', 'In Development', 'QA Handoff'],
     sections: [
       {
         id: 'developer-actions',
         title: 'What Can I Do?',
         summary: 'Actions available to assigned delivery team members.',
         items: [
-          'View assigned requests',
-          'Update request status',
-          'Add implementation notes',
-          'Upload supporting documents',
-          'Mark work as completed',
+          'View assigned requests and sprint tasks',
+          'Update task status and implementation notes',
+          'Upload supporting documents and evidence',
+          'Mark sprint tasks complete for PM and QA review',
         ],
       },
       {
         id: 'developer-workflow',
         title: 'Typical Workflow',
-        summary: 'Common delivery path for assigned work.',
-        steps: ['Assigned', 'In Analysis', 'In Development', 'Testing', 'Deployed'],
+        summary: 'Your path from assignment through QA handoff.',
+        steps: [
+          'Receive sprint task assignment',
+          'Implement and document your work',
+          'Mark tasks complete',
+          'PM submits the build for QA and requester UAT',
+        ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'Where your work fits in the delivery pipeline.',
+        stages: [
+          { label: 'Assigned', description: 'You are on the delivery team.' },
+          { label: 'Sprint Active', description: 'Work through your sprint tasks.' },
+          { label: 'In Development', description: 'Active coding and implementation.' },
+          { label: 'Development Complete', description: 'Your tasks are done; QA reviews next.' },
+          { label: 'Review & Validation', description: 'QA validates the combined build.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'Requester tests before final deployment.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses that affect your assigned work.',
+        rows: [
+          { status: 'Assigned', description: 'Team assigned; sprint planning may be in progress.' },
+          { status: 'Sprint Active', description: 'Sprint tasks are being executed.' },
+          { status: 'In Development', description: 'Implementation is in progress.' },
+          { status: 'Development Complete', description: 'Build handed off for QA.' },
+          { status: 'Review & Validation', description: 'QA is reviewing your deliverable.' },
+          { status: 'QA Failed', description: 'Issues found; more development may be needed.' },
+        ],
+      }),
     ],
   },
   QA: {
     title: 'QA Manual',
-    subtitle: 'Validate completed work, record results, and return requests when issues remain.',
+    subtitle: 'Validate completed builds, record test results, and release work to requester pre-deployment UAT.',
+    workflowSnapshot: ['QA Pending', 'Testing', 'Pass to UAT', 'Sign-Off'],
     sections: [
       {
         id: 'qa-actions',
         title: 'What Can I Do?',
         summary: 'Actions available to reviewers.',
         items: [
-          'View requests ready for testing',
-          'Review implementation notes and attachments',
-          'Record test summary',
-          'Pass requests to final approval',
-          'Return requests for changes',
-          'Request clarification when information is missing',
+          'Review requests ready for validation',
+          'Record test results and findings',
+          'Pass builds to requester UAT for Pre-Deployment',
+          'Return requests to development when issues remain',
+          'Request clarification when acceptance criteria are unclear',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'QA stage from development complete through UAT handoff.',
+        stages: [
+          { label: 'Development Complete', description: 'Build is ready for your review.' },
+          { label: 'Review & Validation', description: 'You execute test cases and record results.' },
+          { label: 'QA Passed', description: 'Build approved for requester UAT.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'Requester validates before final deployment.' },
+          { label: 'Sign-Off', description: 'Request closed after final deployment and confirmation.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses you act on during quality review.',
+        rows: [
+          { status: 'QA Pending', description: 'Awaiting your test execution.' },
+          { status: 'In Testing', description: 'Testing is actively in progress.' },
+          { status: 'QA Passed', description: 'You approved; moving to requester UAT.' },
+          { status: 'QA Failed', description: 'Issues found; returned for fixes.' },
+          { status: 'Requester UAT for Pre-Deployment', description: 'Requester is validating the deployment.' },
+          { status: 'UAT Failed', description: 'Requester found issues during pre-deployment UAT.' },
+          { status: 'Sign-Off', description: 'Request completed and closed.' },
+        ],
+      }),
     ],
   },
   UAT_APPROVER: {
     title: 'Final Approver Manual',
-    subtitle: 'Perform final business acceptance before requests are closed.',
+    subtitle: 'Support final acceptance workflows and monitor requests approaching sign-off.',
+    workflowSnapshot: ['Requester UAT', 'Final Deployment', 'Sign-Off'],
     sections: [
       {
         id: 'final-approval-actions',
         title: 'What Can I Do?',
-        summary: 'Actions available during final approval.',
+        summary: 'Actions available during final acceptance.',
         items: [
-          'View requests awaiting final approval',
-          'Review delivered outcome',
-          'Approve and close accepted requests',
-          'Return requests for changes',
-          'Request clarification when acceptance details are unclear',
+          'View requests in requester UAT for Pre-Deployment',
+          'Review delivered outcomes and acceptance evidence',
+          'Support requester decisions on approve or return for changes',
+          'Monitor requests through final deployment and sign-off',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'Final acceptance path after QA through sign-off.',
+        stages: [
+          { label: 'Requester UAT for Pre-Deployment', description: 'Requester validates the deployed solution.' },
+          { label: 'Final Deployment Pending', description: 'Production deployment after UAT approval.' },
+          { label: 'Ready for Completion', description: 'Awaiting requester final confirmation.' },
+          { label: 'Sign-Off', description: 'Request is closed.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Statuses at the end of the lifecycle.',
+        rows: [
+          { status: 'Requester UAT for Pre-Deployment', description: 'Requester is testing before final deployment.' },
+          { status: 'UAT Approved', description: 'Requester approved pre-deployment UAT.' },
+          { status: 'UAT Rejected', description: 'Returned for changes after UAT.' },
+          { status: 'Final Deployment Pending', description: 'Awaiting final production release.' },
+          { status: 'Deployed', description: 'Solution deployed to production.' },
+          { status: 'Ready for Completion', description: 'Awaiting requester sign-off.' },
+          { status: 'Sign-Off', description: 'Request closed.' },
+        ],
+      }),
     ],
   },
   SYSTEM_ADMIN: {
     title: 'System Admin Manual',
-    subtitle: 'Administer users, departments, workflow visibility, and operational governance.',
+    subtitle: 'Administer users, departments, workflow visibility, audits, and operational governance.',
+    workflowSnapshot: ['All Stages', 'User Management', 'Audit', 'Sign-Off'],
     sections: [
       {
         id: 'admin-actions',
         title: 'What Can I Do?',
         summary: 'Administrative capabilities available to system administrators.',
         items: [
-          'Manage users',
-          'Manage departments',
-          'Configure workflow settings',
-          'View analytics and reports',
-          'Audit user actions',
-          'Reopen requests if necessary',
+          'Manage users, roles, and departments',
+          'Approve registration and role access requests',
+          'View organization-wide analytics and dashboards',
+          'Audit user actions and request history',
+          'Delete requests when required for data governance',
         ],
       },
-      ...baseSections,
+      workflowSection({
+        summary: 'Full request lifecycle you can observe across the organization.',
+        stages: [
+          { label: 'Intake & Approval', description: 'Department and IT approval gates.' },
+          { label: 'Assignment & Delivery', description: 'PM, developer, and sprint execution.' },
+          { label: 'Review & Validation', description: 'QA testing before UAT.' },
+          { label: 'Requester UAT for Pre-Deployment', description: 'Pre-production validation by requester.' },
+          { label: 'Final Deployment Pending', description: 'Final production release.' },
+          { label: 'Sign-Off', description: 'Closed requests across all departments.' },
+        ],
+      }),
+      statusGuideSection({
+        summary: 'Complete status reference for administrators.',
+        rows: [
+          { status: 'Submitted', description: 'New request awaiting department approval.' },
+          { status: 'IT Review Pending', description: 'Awaiting IT feasibility review.' },
+          { status: 'Assigned / In Development', description: 'Active delivery in progress.' },
+          { status: 'Review & Validation', description: 'QA testing stage.' },
+          { status: 'Requester UAT for Pre-Deployment', description: 'Pre-deployment requester validation.' },
+          { status: 'Final Deployment Pending', description: 'Awaiting final production deployment.' },
+          { status: 'Sign-Off', description: 'Request closed successfully.' },
+          { status: 'Withdrawn', description: 'Withdrawn by the original requester.' },
+          { status: 'Rejected', description: 'Stopped at department or IT approval.' },
+        ],
+      }),
     ],
   },
 };
@@ -276,8 +439,9 @@ function sectionMatches(section, query) {
     section.summary,
     ...(section.items || []),
     ...(section.steps || []),
-    section.type === 'statusGuide' ? statusGuide.map((row) => `${row.status} ${row.description}`).join(' ') : '',
-    section.type === 'workflow' ? [...workflowStages, ...alternateEndStates.map((state) => state.label)].join(' ') : '',
+    ...(section.rows || []).map((row) => `${row.status} ${row.description}`),
+    ...(section.stages || []).map((stage) => `${stage.label} ${stage.description}`),
+    ...(section.alternateEndStates || []).map((state) => `${state.label} ${state.description}`),
   ].join(' ');
   return normalize(searchable).includes(query);
 }
@@ -343,7 +507,7 @@ export default function UserManualPage() {
                     <Typography variant="caption" color="text.secondary">Standard flow at a glance</Typography>
                   </Box>
                 </Stack>
-                <CompactWorkflow />
+                <CompactWorkflow stages={manual.workflowSnapshot || []} />
               </ManualCard>
             </Stack>
           </Grid>
@@ -374,8 +538,8 @@ function ManualSection({ section, defaultExpanded }) {
         </Box>
       </AccordionSummary>
       <AccordionDetails sx={{ p: { xs: 1.5, md: 2 } }}>
-        {section.type === 'statusGuide' ? <StatusGuideTable /> : null}
-        {section.type === 'workflow' ? <WorkflowTimeline /> : null}
+        {section.type === 'statusGuide' ? <StatusGuideTable rows={section.rows || []} /> : null}
+        {section.type === 'workflow' ? <WorkflowTimeline stages={section.stages || []} alternateEndStates={section.alternateEndStates || []} /> : null}
         {section.items ? <BulletList items={section.items} /> : null}
         {section.steps ? <StepList steps={section.steps} /> : null}
       </AccordionDetails>
@@ -442,7 +606,7 @@ function StepList({ steps }) {
   );
 }
 
-function StatusGuideTable() {
+function StatusGuideTable({ rows }) {
   return (
     <TableContainer sx={{ borderRadius: 2, border: '1px solid', borderColor: 'divider', overflowX: 'auto' }}>
       <Table size="small" sx={{ minWidth: 680 }}>
@@ -453,7 +617,7 @@ function StatusGuideTable() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {statusGuide.map((row) => (
+          {rows.map((row) => (
             <TableRow key={row.status} hover>
               <TableCell sx={{ width: 220 }}>
                 <Chip size="small" label={row.status} sx={{ borderRadius: 1, fontWeight: 850 }} />
@@ -469,11 +633,11 @@ function StatusGuideTable() {
   );
 }
 
-function WorkflowTimeline() {
+function WorkflowTimeline({ stages, alternateEndStates: endStates }) {
   return (
     <Stack spacing={1.1}>
-      {workflowStages.map((stage, index) => (
-        <Stack key={stage} direction="row" spacing={1.2} sx={{ alignItems: 'stretch' }}>
+      {stages.map((stage, index) => (
+        <Stack key={stage.label} direction="row" spacing={1.2} sx={{ alignItems: 'stretch' }}>
           <Stack sx={{ alignItems: 'center', width: 28, flexShrink: 0 }}>
             <Box
               sx={{
@@ -491,18 +655,18 @@ function WorkflowTimeline() {
             >
               {index + 1}
             </Box>
-            {index < workflowStages.length - 1 && (
+            {index < stages.length - 1 && (
               <Box sx={{ width: 2, flex: 1, minHeight: 18, bgcolor: (theme) => theme.custom.semantic.borderSoft }} />
             )}
           </Stack>
-          <Box sx={{ flex: 1, minWidth: 0, pb: index < workflowStages.length - 1 ? 0.5 : 0 }}>
-            <Typography variant="body2" fontWeight={850}>{stage}</Typography>
-            <Typography variant="caption" color="text.secondary">{statusGuide.find((row) => row.status === stage)?.description || 'Workflow stage'}</Typography>
+          <Box sx={{ flex: 1, minWidth: 0, pb: index < stages.length - 1 ? 0.5 : 0 }}>
+            <Typography variant="body2" fontWeight={850}>{stage.label}</Typography>
+            <Typography variant="caption" color="text.secondary">{stage.description}</Typography>
           </Box>
         </Stack>
       ))}
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ pt: 1 }}>
-        {alternateEndStates.map((state) => (
+        {endStates.map((state) => (
           <Box
             key={state.label}
             sx={{
@@ -522,16 +686,16 @@ function WorkflowTimeline() {
   );
 }
 
-function CompactWorkflow() {
+function CompactWorkflow({ stages }) {
   return (
     <Stack spacing={0.8}>
-      {workflowStages.slice(0, 6).map((stage) => (
+      {stages.map((stage) => (
         <Stack key={stage} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />
           <Typography variant="caption" fontWeight={760}>{stage}</Typography>
         </Stack>
       ))}
-      <Typography variant="caption" color="text.secondary">Continues through development, testing, deployment, and closure.</Typography>
+      <Typography variant="caption" color="text.secondary">Stages shown are the most relevant for your role.</Typography>
     </Stack>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Avatar, Box, Button, Chip, Divider, Grid, LinearProgress, Stack, Typography } from '@mui/material';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   Building2,
   CheckCircle2,
@@ -24,6 +24,7 @@ import PageHeader from '../components/PageHeader';
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const location = useLocation();
   const [dashboard, setDashboard] = useState({ cards: [], recentActivity: [] });
   const [requests, setRequests] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -33,40 +34,59 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+
     async function load() {
-      const showAllRequests = ['EMPLOYEE', 'SYSTEM_ADMIN', 'IT_HEAD'].includes(user?.roleCode);
-      const requestEndpoint = showAllRequests ? '/requests' : (user?.roleCode === 'EMPLOYEE' ? '/requests?mine=true' : '/requests');
-      const [dashboardData, requestRows, departmentRows, notificationRows] = await Promise.all([
-        api.get('/dashboard/me'),
-        api.get(requestEndpoint),
-        api.get('/departments'),
-        api.get('/notifications?isRead=0'),
-      ]);
-      const [userRows, registrationRows] = user?.roleCode === 'SYSTEM_ADMIN'
-        ? await Promise.all([
-          api.get('/users').catch(() => []),
-          api.get(`${panelApiPrefix}/registrations?status=PENDING_APPROVAL`).catch(() => []),
-        ])
-        : [[], []];
-      setDashboard(dashboardData);
-      setRequests(requestRows);
-      setDepartments(departmentRows);
-      setNotifications(notificationRows);
-      setUsers(userRows);
-      setRegistrations(registrationRows);
-      setLoading(false);
+      if (!user?.id) {
+        if (mounted) setLoading(false);
+        return;
+      }
+      if (mounted) setLoading(true);
+      try {
+        const [dashboardData, requestRows, departmentRows, notificationRows] = await Promise.all([
+          api.get('/dashboard/me'),
+          api.get('/requests'),
+          api.get('/departments'),
+          api.get('/notifications?isRead=0'),
+        ]);
+        const [userRows, registrationRows] = user?.roleCode === 'SYSTEM_ADMIN'
+          ? await Promise.all([
+            api.get('/users').catch(() => []),
+            api.get(`${panelApiPrefix}/registrations?status=PENDING_APPROVAL`).catch(() => []),
+          ])
+          : [[], []];
+        if (!mounted) return;
+        setDashboard(dashboardData);
+        setRequests(requestRows);
+        setDepartments(departmentRows);
+        setNotifications(notificationRows);
+        setUsers(userRows);
+        setRegistrations(registrationRows);
+      } catch {
+        if (!mounted) return;
+      } finally {
+        if (mounted) setLoading(false);
+      }
     }
-    load().catch(() => setLoading(false));
-  }, [user?.roleCode]);
+
+    load();
+    const refresh = () => { load().catch(() => {}); };
+    window.addEventListener('focus', refresh);
+    return () => {
+      mounted = false;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [user?.id, user?.roleCode, location.pathname]);
 
   const today = new Intl.DateTimeFormat('en', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date());
   const firstName = user?.fullName?.split(' ')[0] || 'there';
 
+  const terminalStatuses = ['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED', 'WITHDRAWN'];
   const counts = {
     total: requests.length,
     pending: requests.filter((item) => ['DEPARTMENT_APPROVAL_PENDING', 'IT_REVIEW_PENDING', 'ASSIGNMENT_PENDING', 'CLARIFICATION_REQUESTED'].includes(item.status)).length,
-    development: requests.filter((item) => ['ASSIGNED', 'SPRINT_ACTIVE', 'IN_DEVELOPMENT'].includes(item.status)).length,
-    testing: requests.filter((item) => item.status === 'IN_TESTING').length,
+    development: requests.filter((item) => ['ASSIGNED', 'SPRINT_ACTIVE', 'IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'].includes(item.status)).length,
+    testing: requests.filter((item) => ['IN_TESTING', 'QA_PENDING', 'QA_FAILED', 'QA_PASSED'].includes(item.status)).length,
     closed: requests.filter((item) => item.status === 'CLOSED').length,
     pendingUat: requests.filter((item) => item.status === 'UAT_PENDING').length,
     activeUsers: users.filter((item) => item.status === 'ACTIVE').length,
@@ -79,7 +99,7 @@ export default function DashboardPage() {
     head: department.department_head_name || missingReportingAuthorityText,
     hasHead: Boolean(department.department_head_name),
     count: requests.filter((request) => request.department_name === department.name).length,
-    pending: requests.filter((request) => request.department_name === department.name && !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED', 'WITHDRAWN'].includes(request.status)).length,
+    pending: requests.filter((request) => request.department_name === department.name && !terminalStatuses.includes(request.status)).length,
     completed: requests.filter((request) => request.department_name === department.name && request.status === 'CLOSED').length,
   })).map((department) => ({
     ...department,
@@ -170,7 +190,7 @@ export default function DashboardPage() {
                     ['Active users', counts.activeUsers || counts.users, <Users size={16} />],
                     ['Departments', counts.departments, <Building2 size={16} />],
                     ['Open requests', counts.total - counts.closed, <GitPullRequest size={16} />],
-                    ['Completed requests', counts.closed, <CheckCircle2 size={16} />],
+                    ['Signed-off requests', counts.closed, <CheckCircle2 size={16} />],
                     ['System health', 'Healthy', <HeartPulse size={16} />],
                   ]}
                 />
@@ -282,7 +302,7 @@ function DepartmentOverview({ rows }) {
       <Grid container spacing={1.25}>
         <DepartmentSummaryCard label="Total Requests" value={totals.requests} helper="Across all departments" tone="info" />
         <DepartmentSummaryCard label="Pending Work" value={totals.pending} helper="Open workflow items" tone={totals.pending ? 'warning' : 'success'} />
-        <DepartmentSummaryCard label="Completed" value={totals.completed} helper="Closed requests" tone="success" />
+        <DepartmentSummaryCard label="Sign-Off" value={totals.completed} helper="Signed-off requests" tone="success" />
         <DepartmentSummaryCard label="Missing Heads" value={totals.withoutHead} helper="Departments needing setup" tone={totals.withoutHead ? 'error' : 'success'} />
       </Grid>
 
@@ -394,7 +414,7 @@ function DepartmentMetric({ label, value, tone = 'info' }) {
 }
 
 function EmployeeRequestOverview({ requests }) {
-  const activeRequests = requests.filter((request) => !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED', 'WITHDRAWN'].includes(request.status));
+  const activeRequests = requests.filter((request) => !terminalStatuses.includes(request.status));
   const pendingApprovals = requests.filter((request) => ['DEPARTMENT_APPROVAL_PENDING', 'IT_REVIEW_PENDING'].includes(request.status));
   const responseNeeded = requests.filter((request) => request.status === 'CLARIFICATION_REQUESTED');
   const recentRequests = [...requests]
@@ -614,13 +634,15 @@ function buildRoleKpiCards(cards = []) {
     'Tasks Blocked': { tone: 'danger', icon: <ClipboardCheck size={17} />, change: 'Needs PM help' },
     'Developer Workload': { tone: 'purple', icon: <Users size={17} />, change: 'Open assigned tasks' },
     Overdue: { tone: 'danger', icon: <ClipboardCheck size={17} />, change: 'Needs attention' },
-    Completed: { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Completed work' },
+    'Sign-Off': { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Signed off' },
+    Completed: { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Signed off' },
     'Sign-Off': { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Signed off' },
     'Review & Validation': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Review queue' },
     'Pending Review': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Ready for review' },
     'In Review': { tone: 'purple', icon: <TestTube2 size={17} />, change: 'Under review' },
     Failed: { tone: 'danger', icon: <TestTube2 size={17} />, change: 'Needs rework' },
     Passed: { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Review passed' },
+    'Requester UAT for Pre-Deployment': { tone: 'warning', icon: <ClipboardCheck size={17} />, change: 'Pre-deployment UAT' },
     'Final Approval': { tone: 'warning', icon: <ClipboardCheck size={17} />, change: 'Approval queue' },
     'Pending Final Approval': { tone: 'warning', icon: <ClipboardCheck size={17} />, change: 'Needs approval' },
     Approved: { tone: 'success', icon: <CheckCircle2 size={17} />, change: 'Accepted' },

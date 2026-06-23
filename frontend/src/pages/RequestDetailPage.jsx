@@ -65,10 +65,10 @@ const workflowSteps = [
   { key: 'SPRINT_PLANNING', label: 'Sprint Planning', description: 'Sprint and task breakdown', matches: ['SPRINT_PLANNING', 'SPRINT_CREATED', 'SPRINT_ACTIVE'] },
   { key: 'IN_DEVELOPMENT', label: 'Work In Progress', description: 'Active implementation', matches: ['IN_DEVELOPMENT', 'DEVELOPMENT_COMPLETE'] },
   { key: 'QA_PENDING', label: 'Review & Validation', description: 'Quality review and validation', matches: ['QA_PENDING', 'QA_FAILED', 'QA_PASSED', 'IN_TESTING', 'TEST_FAILED'] },
-  { key: 'UAT_PENDING', label: 'Requester Testing', description: 'Requester user testing and approval', matches: ['UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'UAT_REJECTED'] },
-  { key: 'DEPLOYMENT_PENDING', label: 'Final Deployment Pending', description: 'Deployment and release', matches: ['DEPLOYMENT_PENDING', 'DEPLOYED'] },
+  { key: 'UAT_PENDING', label: 'Requester UAT for Pre-Deployment', description: 'Requester validates the deployed solution before final deployment', matches: ['UAT_PENDING', 'UAT_FAILED', 'UAT_APPROVED', 'UAT_REJECTED'] },
+  { key: 'DEPLOYMENT_PENDING', label: 'Final Deployment Pending', description: 'Final production deployment after requester UAT', matches: ['DEPLOYMENT_PENDING', 'DEPLOYED'] },
   { key: 'READY_FOR_COMPLETION', label: 'Requester Confirmation', description: 'Requester final completion', matches: ['READY_FOR_COMPLETION'] },
-  { key: 'CLOSED', label: 'Completed', description: 'Request completed', matches: ['CLOSED'] },
+  { key: 'CLOSED', label: 'Sign-Off', description: 'Request signed off and closed', matches: ['CLOSED'] },
 ];
 
 const appBasePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
@@ -595,6 +595,7 @@ export default function RequestDetailPage() {
   const [assignment, setAssignment] = useState({ developerUserId: '', qaUserId: '', notes: '' });
   const [testResult, setTestResult] = useState({ result: 'PASS', testSummary: '', defectsFound: '' });
   const [previewAttachment, setPreviewAttachment] = useState(null);
+  const [planningDialogTrigger, setPlanningDialogTrigger] = useState(null);
   const [clarificationAction, setClarificationAction] = useState(null);
   const [clarificationForm, setClarificationForm] = useState({ reasonCategory: 'MISSING_REQUIREMENTS', note: '' });
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -696,6 +697,20 @@ export default function RequestDetailPage() {
     } catch (err) {
       setError(err.message);
     }
+  }
+
+  function openPlanningScopeDialog() {
+    document.getElementById('planning-workspace-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setPlanningDialogTrigger({ type: 'scope', token: Date.now() });
+  }
+
+  function openPlanningStoryDialog() {
+    document.getElementById('planning-workspace-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setPlanningDialogTrigger({ type: 'story', mode: 'create', token: Date.now() });
+  }
+
+  function clearPlanningDialogTrigger() {
+    setPlanningDialogTrigger(null);
   }
 
   function openClarificationModal(action) {
@@ -919,13 +934,15 @@ export default function RequestDetailPage() {
               </WorkspacePanel>
             </Box>
 
-            <Box sx={{ order: { xs: 5 } }}>
+            <Box id="planning-workspace-panel" sx={{ order: { xs: 5 } }}>
               <PlanningWorkspace
                 request={request}
                 user={user}
                 scopes={planningScopes}
                 stories={planningStories}
                 requirementsReview={requirementsReview}
+                planningDialogTrigger={planningDialogTrigger}
+                onPlanningDialogConsumed={clearPlanningDialogTrigger}
                 onRefresh={load}
                 showToast={showToast}
                 setError={setError}
@@ -1024,6 +1041,8 @@ export default function RequestDetailPage() {
                 timeline={timeline}
                 navigate={navigate}
                 showToast={showToast}
+                onOpenScopeDialog={openPlanningScopeDialog}
+                onOpenStoryDialog={openPlanningStoryDialog}
               />
             </Box>
 
@@ -1603,7 +1622,7 @@ function ScopeReportBlock({ label, value, wide = false }) {
   );
 }
 
-function PlanningWorkspace({ request, user, scopes, stories, requirementsReview, preselectedRequirementsAction = '', onRequirementsActionConsumed, onRefresh, showToast, setError }) {
+function PlanningWorkspace({ request, user, scopes, stories, requirementsReview, planningDialogTrigger = null, onPlanningDialogConsumed, preselectedRequirementsAction = '', onRequirementsActionConsumed, onRefresh, showToast, setError }) {
   const [scopeForm, setScopeForm] = useState(scopeFormDefaults);
   const [storyForm, setStoryForm] = useState(storyFormDefaults);
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
@@ -1768,6 +1787,16 @@ function PlanningWorkspace({ request, user, scopes, stories, requirementsReview,
     setScopeDialogOpen(true);
   }
 
+  useEffect(() => {
+    if (!planningDialogTrigger) return;
+    if (planningDialogTrigger.type === 'scope') {
+      openScopeDialog();
+    } else if (planningDialogTrigger.type === 'story') {
+      openStoryDialog(planningDialogTrigger.mode || 'create');
+    }
+    onPlanningDialogConsumed?.();
+  }, [planningDialogTrigger?.token]);
+
   function openStoryDialog(mode, story = null) {
     setStoryDialog({ open: true, mode, story });
     setStoryForm(story ? {
@@ -1887,6 +1916,14 @@ function PlanningWorkspace({ request, user, scopes, stories, requirementsReview,
   }
 
   async function submitPlanning() {
+    if (!primaryScope) {
+      setError('Create a project scope before submitting for review.');
+      return;
+    }
+    if (stories.length === 0) {
+      setError('Create at least one user story before submitting for review.');
+      return;
+    }
     await runPlanningAction(
       () => api.post(`/requests/${request.id}/planning/submit`),
       'Requirements submitted for Department HOD review.',
@@ -1950,6 +1987,13 @@ function PlanningWorkspace({ request, user, scopes, stories, requirementsReview,
                   {request.status === 'REQUIREMENTS_CLARIFICATION_REQUESTED' ? 'Resubmit Requirements' : 'Submit Review'}
                 </Button>
               </Box>
+            )}
+            {canManagePlanning && !canShowRequirementReview && (
+              <Alert severity="info" sx={{ width: '100%', maxWidth: 980 }}>
+                {primaryScope && stories.length === 0
+                  ? 'Scope is saved. Add at least one user story before you can submit scope and stories together for Department HOD review.'
+                  : 'Create both a project scope and at least one user story before submitting for Department HOD review.'}
+              </Alert>
             )}
 
             {['REQUIREMENTS_DEPARTMENT_REVIEW', 'REQUIREMENTS_PM_REVIEW', 'REQUIREMENTS_IT_REVIEW', 'REQUIREMENTS_CLARIFICATION_REQUESTED'].includes(request.status) && (
@@ -3941,17 +3985,20 @@ function AttachmentCard({ attachment, requestId, onPreview }) {
 }
 
 function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = false }) {
-  const token = encodeURIComponent(localStorage.getItem('requestops.accessToken') || '');
   const rawToken = localStorage.getItem('requestops.accessToken') || '';
   const previewUrl = attachment
     ? `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/preview`
     : '';
   const downloadUrl = attachment
-    ? `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/download?token=${token}`
+    ? `${apiBaseUrl}/requests/${requestId}/attachments/${attachment.id}/download?token=${encodeURIComponent(rawToken)}`
     : '';
   const mimeType = attachment?.mime_type || '';
-  const canPreview = mimeType.startsWith('image/') || mimeType === 'application/pdf';
+  const isImage = mimeType.startsWith('image/');
+  const isPdf = mimeType === 'application/pdf';
+  const isText = mimeType.startsWith('text/') || ['application/json', 'application/xml', 'application/javascript'].includes(mimeType);
+  const canPreview = isImage || isPdf || isText;
   const [objectUrl, setObjectUrl] = useState('');
+  const [textPreview, setTextPreview] = useState('');
   const [previewError, setPreviewError] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -3961,6 +4008,7 @@ function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = 
 
     async function loadPreview() {
       setObjectUrl('');
+      setTextPreview('');
       setPreviewError('');
 
       if (!attachment || !canPreview) return;
@@ -3973,9 +4021,14 @@ function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = 
         if (!response.ok) {
           throw new Error(`Preview request failed with status ${response.status}.`);
         }
-        const blob = await response.blob();
-        nextObjectUrl = URL.createObjectURL(blob);
-        if (!revoked) setObjectUrl(nextObjectUrl);
+        if (isText) {
+          const text = await response.text();
+          if (!revoked) setTextPreview(text);
+        } else {
+          const blob = await response.blob();
+          nextObjectUrl = URL.createObjectURL(blob);
+          if (!revoked) setObjectUrl(nextObjectUrl);
+        }
       } catch (err) {
         if (!revoked) setPreviewError(err.message || 'Unable to load attachment preview.');
       } finally {
@@ -3989,25 +4042,46 @@ function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = 
       revoked = true;
       if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
     };
-  }, [attachment, canPreview, previewUrl, rawToken]);
+  }, [attachment, canPreview, isText, previewUrl, rawToken]);
 
   return (
     <Dialog
       open={Boolean(attachment)}
       onClose={onClose}
-      maxWidth="lg"
+      maxWidth={false}
       fullWidth
       fullScreen={fullScreen}
-      PaperProps={{ sx: { borderRadius: fullScreen ? 0 : 2.5, height: fullScreen ? '100dvh' : '86vh', display: 'flex', flexDirection: 'column' } }}
+      PaperProps={{
+        sx: {
+          borderRadius: fullScreen ? 0 : 2.5,
+          width: fullScreen ? '100%' : 'min(96vw, 1200px)',
+          maxWidth: fullScreen ? '100%' : '96vw',
+          height: fullScreen ? '100dvh' : '92vh',
+          maxHeight: fullScreen ? '100dvh' : '92vh',
+          display: 'flex',
+          flexDirection: 'column',
+          m: fullScreen ? 0 : 1,
+        },
+      }}
     >
-      <DialogTitle sx={{ py: 1.5, pr: 7 }}>
+      <DialogTitle sx={{ py: 1.5, pr: 7, flexShrink: 0 }}>
         <Typography variant="subtitle1" fontWeight={850} sx={{ overflowWrap: 'anywhere' }}>{attachment?.original_file_name || 'Attachment Preview'}</Typography>
         <IconButton onClick={onClose} sx={{ position: 'absolute', right: 12, top: 10 }}>
           <CloseIcon />
         </IconButton>
       </DialogTitle>
-      <DialogContent dividers sx={{ p: 0, display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {!attachment ? null : (previewLoading || (canPreview && !objectUrl && !previewError)) ? (
+      <DialogContent
+        dividers
+        sx={{
+          p: 0,
+          display: 'flex',
+          flex: 1,
+          minHeight: 0,
+          overflow: 'hidden',
+          bgcolor: (theme) => theme.custom.semantic.paperSoft,
+        }}
+      >
+        {!attachment ? null : (previewLoading || (canPreview && !objectUrl && !textPreview && !previewError)) ? (
           <Stack spacing={1.5} sx={{ m: 'auto', p: 3, textAlign: 'center', alignItems: 'center' }}>
             <LinearProgress sx={{ width: 220 }} />
             <Typography variant="body2" color="text.secondary">Loading attachment preview...</Typography>
@@ -4020,17 +4094,37 @@ function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = 
             <Button variant="contained" href={downloadUrl} target="_blank">Download File</Button>
           </Stack>
         ) : canPreview ? (
-          mimeType.startsWith('image/') ? (
-            <Box sx={{ width: '100%', height: '100%', minHeight: { xs: 0, md: 420 }, p: 2, display: 'grid', placeItems: 'center', bgcolor: (theme) => theme.custom.semantic.paperSoft, overflow: 'auto' }}>
+          isImage ? (
+            <Box sx={{ flex: 1, minHeight: 0, width: '100%', overflow: 'auto', p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
               <Box
                 component="img"
                 src={objectUrl}
                 alt={attachment.original_file_name}
-                sx={{ display: 'block', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 1.5 }}
+                sx={{ display: 'block', maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain' }}
               />
             </Box>
+          ) : isPdf ? (
+            <Box component="iframe" title={attachment.original_file_name} src={objectUrl} sx={{ flex: 1, width: '100%', minHeight: 0, border: 0 }} />
           ) : (
-            <Box component="iframe" title={attachment.original_file_name} src={objectUrl} sx={{ width: '100%', height: '100%', minHeight: { xs: 0, md: 520 }, border: 0 }} />
+            <Box
+              component="pre"
+              sx={{
+                flex: 1,
+                minHeight: 0,
+                width: '100%',
+                m: 0,
+                p: 2.5,
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                fontSize: 13,
+                lineHeight: 1.55,
+                bgcolor: (theme) => theme.custom.semantic.paper,
+              }}
+            >
+              {textPreview}
+            </Box>
           )
         ) : (
           <Stack spacing={1.5} sx={{ m: 'auto', p: 3, textAlign: 'center', alignItems: 'center' }}>
@@ -4043,6 +4137,10 @@ function AttachmentPreviewDialog({ attachment, requestId, onClose, fullScreen = 
           </Stack>
         )}
       </DialogContent>
+      <DialogActions sx={{ flexShrink: 0, px: 2, py: 1.25 }}>
+        <Button color="inherit" onClick={onClose}>Close</Button>
+        <Button variant="outlined" href={downloadUrl} target="_blank">Download</Button>
+      </DialogActions>
     </Dialog>
   );
 }
@@ -4516,7 +4614,7 @@ const workflowMilestoneLabels = {
   QA_PENDING: 'QA Review',
   QA_FAILED: 'QA Failed',
   QA_PASSED: 'QA Passed',
-  UAT_PENDING: 'Requester UAT',
+  UAT_PENDING: 'Requester UAT for Pre-Deployment',
   UAT_FAILED: 'UAT Failed',
   UAT_APPROVED: 'UAT Approved',
   DEPLOYMENT_PENDING: 'Final Deployment Pending',
@@ -6166,6 +6264,8 @@ function WorkflowActions(props) {
     timeline = [],
     navigate,
     showToast,
+    onOpenScopeDialog,
+    onOpenStoryDialog,
     preselectedActionId = '',
   } = props;
   const role = user?.roleCode;
@@ -6388,22 +6488,22 @@ function WorkflowActions(props) {
   if (canManagePlanning) {
     actionGroups.push(
       {
-        id: 'open-scope-management',
+        id: 'open-scope-editor',
         label: 'Create / Edit Scope',
-        description: 'Define in scope, out of scope, and objectives',
+        description: 'Define in scope, out of scope, and objectives in the project workspace',
         tone: 'neutral',
         icon: Send,
-        submitLabel: 'Open Scope Management',
-        onSubmit: () => navigate('/project-scopes'),
+        openOnSelect: true,
+        onSubmit: () => onOpenScopeDialog?.(),
       },
       {
-        id: 'open-story-management',
+        id: 'open-story-editor',
         label: 'Create / Edit User Stories',
-        description: 'Prepare acceptance criteria and priorities for Department HOD review',
+        description: 'Prepare acceptance criteria and priorities in the project workspace',
         tone: 'neutral',
         icon: Send,
-        submitLabel: 'Open User Story Management',
-        onSubmit: () => navigate('/user-stories'),
+        openOnSelect: true,
+        onSubmit: () => onOpenStoryDialog?.(),
       },
     );
   }
@@ -6562,8 +6662,8 @@ function WorkflowActions(props) {
   if (canSendToRequesterTesting) {
     actionGroups.push({
       id: 'send-requester-testing',
-      label: 'Send To Requester Testing',
-      description: 'Send QA-approved work to the employee requester for user testing',
+      label: 'Send To Pre-Deployment UAT',
+      description: 'Send QA-approved work to the requester for pre-deployment validation',
       tone: 'success',
       icon: Send,
       requesterTesting: true,
@@ -6636,7 +6736,7 @@ function WorkflowActions(props) {
     });
   }
 
-  const selectedAction = actionGroups.find((item) => item.id === selectedActionId);
+  const selectedAction = actionGroups.find((item) => item.id === selectedActionId && !item.openOnSelect);
   const decisionReady = !selectedAction
     ? false
     : selectedAction.clarification
@@ -6753,6 +6853,11 @@ function WorkflowActions(props) {
                 action={action}
                 selected={selectedActionId === action.id}
                 onSelect={() => {
+                  if (action.openOnSelect) {
+                    action.onSubmit?.();
+                    setSelectedActionId('');
+                    return;
+                  }
                   setSelectedActionId(action.id);
                   if (action.testResult) {
                     setTestResult((current) => ({ ...current, result: action.testResult }));

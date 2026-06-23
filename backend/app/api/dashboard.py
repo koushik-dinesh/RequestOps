@@ -39,7 +39,7 @@ def requester_scoped_cards(db: Session, params: dict) -> list[dict]:
         {"label": "Planning", "value": scalar(db, f"SELECT COUNT(*) AS count FROM requests WHERE {scope} AND status IN ('ASSIGNMENT_PENDING','PM_ASSIGNED','SCOPE_REVIEW','USER_STORY_REVIEW','DEVELOPER_ASSIGNED','SPRINT_PLANNING','REQUIREMENTS_DEPARTMENT_REVIEW','REQUIREMENTS_PM_REVIEW','REQUIREMENTS_IT_REVIEW','REQUIREMENTS_CLARIFICATION_REQUESTED','REQUIREMENTS_APPROVED')", params), "href": "/requests?status=ASSIGNMENT_PENDING"},
         {"label": "Waiting For More Information", "value": scalar(db, f"SELECT COUNT(*) AS count FROM requests WHERE {scope} AND status = 'CLARIFICATION_REQUESTED'", params), "href": "/requests?status=CLARIFICATION_REQUESTED"},
         {"label": "In Progress", "value": scalar(db, f"SELECT COUNT(*) AS count FROM requests WHERE {scope} AND status IN ('ASSIGNED','DEVELOPER_ASSIGNED','SPRINT_PLANNING','SPRINT_CREATED','SPRINT_ACTIVE','IN_DEVELOPMENT','DEVELOPMENT_COMPLETE','QA_PENDING','QA_PASSED','IN_TESTING','DEPLOYMENT_PENDING','DEPLOYED','READY_FOR_COMPLETION')", params), "href": "/requests?status=IN_DEVELOPMENT"},
-        {"label": "Final Approval", "value": scalar(db, f"SELECT COUNT(*) AS count FROM requests WHERE {scope} AND status IN ('UAT_PENDING','UAT_FAILED','UAT_APPROVED')", params), "href": "/requests?status=UAT_PENDING"},
+        {"label": "Requester UAT for Pre-Deployment", "value": scalar(db, f"SELECT COUNT(*) AS count FROM requests WHERE {scope} AND status IN ('UAT_PENDING','UAT_FAILED','UAT_APPROVED')", params), "href": "/requests?status=UAT_PENDING"},
         {"label": "Sign-Off", "value": scalar(db, f"SELECT COUNT(*) AS count FROM requests WHERE {scope} AND status = 'CLOSED'", params), "href": "/requests?status=CLOSED"},
     ]
 
@@ -60,7 +60,7 @@ def dashboard_me(user: dict = Depends(get_current_user), db: Session = Depends(g
             {"label": "Planning", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status IN ('PM_ASSIGNED','SCOPE_REVIEW','USER_STORY_REVIEW','REQUIREMENTS_DEPARTMENT_REVIEW','REQUIREMENTS_PM_REVIEW','REQUIREMENTS_IT_REVIEW','REQUIREMENTS_CLARIFICATION_REQUESTED','REQUIREMENTS_APPROVED','DEVELOPER_ASSIGNED','SPRINT_PLANNING','SPRINT_CREATED','SPRINT_ACTIVE')", params), "href": "/requests?status=PM_ASSIGNED"},
             {"label": "Requests In Progress", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status IN ('IN_DEVELOPMENT','DEVELOPMENT_COMPLETE')", params), "href": "/requests?status=IN_DEVELOPMENT"},
             {"label": "QA", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status IN ('QA_PENDING','QA_FAILED','QA_PASSED','IN_TESTING')", params), "href": "/requests?status=IN_TESTING"},
-            {"label": "Final Approval", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status IN ('UAT_PENDING','UAT_FAILED','UAT_APPROVED')", params), "href": "/requests?status=UAT_PENDING"},
+            {"label": "Requester UAT for Pre-Deployment", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status IN ('UAT_PENDING','UAT_FAILED','UAT_APPROVED')", params), "href": "/requests?status=UAT_PENDING"},
             {"label": "Sign-Off", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status = 'CLOSED'", params), "href": "/requests?status=CLOSED"},
         ])
         overview_note = "Overview of all organization requests is shown below."
@@ -101,17 +101,17 @@ def dashboard_me(user: dict = Depends(get_current_user), db: Session = Depends(g
             {"label": "In Review", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.qa_user_id = :userId AND r.status = 'QA_PENDING'", params)},
             {"label": "Failed", "value": scalar(db, "SELECT COUNT(*) AS count FROM test_results WHERE qa_user_id = :userId AND result IN ('FAIL','RETEST_REQUIRED')", params)},
             {"label": "Passed", "value": scalar(db, "SELECT COUNT(*) AS count FROM test_results WHERE qa_user_id = :userId AND result = 'PASS'", params)},
-            {"label": "Pending Final Approval", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.qa_user_id = :userId AND r.status = 'UAT_PENDING'", params), "href": "/requests?status=UAT_PENDING"},
+            {"label": "Requester UAT for Pre-Deployment", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.qa_user_id = :userId AND r.status = 'UAT_PENDING'", params), "href": "/requests?status=UAT_PENDING"},
         ])
         overview_note = "Metrics below reflect only requests assigned to you for review."
     elif role == "UAT_APPROVER":
         cards.extend([
-            {"label": "Pending Final Approval", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params)},
+            {"label": "Requester UAT for Pre-Deployment", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params), "href": "/requests?status=UAT_PENDING"},
             {"label": "Approved", "value": scalar(db, "SELECT COUNT(*) AS count FROM uat_approvals WHERE uat_approver_user_id = :userId AND decision = 'APPROVED'", params)},
             {"label": "Rejected", "value": scalar(db, "SELECT COUNT(*) AS count FROM uat_approvals WHERE uat_approver_user_id = :userId AND decision = 'REJECTED'", params)},
             {"label": "Returned for Changes", "value": scalar(db, "SELECT COUNT(*) AS count FROM requests WHERE status IN ('UAT_REJECTED','UAT_FAILED')", params)},
         ])
-        overview_note = "Metrics below reflect requests awaiting your final approval."
+        overview_note = "Metrics below reflect requests in requester pre-deployment UAT and sign-off."
 
     if role in ("SYSTEM_ADMIN", "IT_HEAD"):
         recent_activity_filter = "1=1"

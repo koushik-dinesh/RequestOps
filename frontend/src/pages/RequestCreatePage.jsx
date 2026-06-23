@@ -45,8 +45,9 @@ const workflowSteps = [
   { label: 'Waiting For Assignment', description: 'Team assignment' },
   { label: 'Work In Progress', description: 'Request is being worked on' },
   { label: 'Review & Validation', description: 'Quality review and validation' },
-  { label: 'Final Approval', description: 'Final business approval' },
-  { label: 'Completed', description: 'Request completed' },
+  { label: 'Requester UAT for Pre-Deployment', description: 'Validate the deployed solution before final production release' },
+  { label: 'Final Deployment Pending', description: 'Awaiting final production deployment' },
+  { label: 'Sign-Off', description: 'Request signed off and closed' },
 ];
 
 const currentWorkflowStage = 0;

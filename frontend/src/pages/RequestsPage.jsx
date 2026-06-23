@@ -40,7 +40,7 @@ const savedViews = [
   { label: 'Team Assigned', status: 'ASSIGNED' },
   { label: 'Work In Progress', status: 'IN_DEVELOPMENT' },
   { label: 'Review & Validation', status: 'IN_TESTING' },
-  { label: 'Final Approval', status: 'UAT_PENDING' },
+  { label: 'Requester UAT for Pre-Deployment', status: 'UAT_PENDING' },
   { label: 'Sign-Off', status: 'CLOSED' },
 ];
 
@@ -61,9 +61,9 @@ const pageMetaByPreset = {
     description: 'Review requests moving through testing, validation, and quality checks.',
   },
   UAT_PENDING: {
-    eyebrow: 'FINAL APPROVAL',
-    title: 'Final Approval Queue',
-    description: 'Review requests awaiting final business approval and closure.',
+    eyebrow: 'PRE-DEPLOYMENT UAT',
+    title: 'Requester UAT for Pre-Deployment',
+    description: 'Review requests awaiting requester validation of the deployed solution before final deployment.',
   },
 };
 
@@ -190,7 +190,7 @@ export default function RequestsPage({ presetStatus = '' }) {
           <CompactKpi label="Total Requests" value={stats.total} />
           <CompactKpi label="Pending Action" value={stats.pending} />
           <CompactKpi label="Work In Progress" value={stats.development} />
-          <CompactKpi label="Completed" value={stats.closed} />
+          <CompactKpi label="Sign-Off" value={stats.closed} />
         </Stack>
 
         {error && (

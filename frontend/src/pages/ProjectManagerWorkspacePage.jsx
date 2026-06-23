@@ -23,10 +23,12 @@ import {
   TableRow,
   TextField,
   Typography,
+  Tooltip,
   useTheme,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AssignmentOutlinedIcon from '@mui/icons-material/AssignmentOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import CloseIcon from '@mui/icons-material/Close';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined';
@@ -197,7 +199,14 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
   const canReviewScope = ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'].includes(user?.roleCode);
   const canReviewStories = ['DEPARTMENT_HEAD', 'SYSTEM_ADMIN'].includes(user?.roleCode);
   const canManagePmWork = ['PROJECT_MANAGER', 'SYSTEM_ADMIN'].includes(user?.roleCode);
-  const canSubmitPlanning = canManagePmWork && selectedProject && selectedProject.status === 'PM_ASSIGNED';
+  const canSubmitPlanning = canManagePmWork
+    && selectedProject
+    && selectedProject.status === 'PM_ASSIGNED'
+    && scopes.length > 0
+    && stories.length > 0;
+  const planningPackageBlockedReason = scopes.length > 0 && stories.length === 0
+    ? 'Create at least one user story before submitting scope and stories together for Department HOD review.'
+    : 'Create both a project scope and at least one user story before submitting for Department HOD review.';
 
   async function loadProjects() {
     setLoading(true);
@@ -342,7 +351,21 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
             {mode === 'scopes' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setScopeDialog({ open: true, item: null })} disabled={!selectedRequestId}>New Scope</Button>}
             {mode === 'stories' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setStoryDialog({ open: true, item: null })} disabled={!selectedRequestId}>New Story</Button>}
             {mode === 'sprints' && canManagePmWork && <Button startIcon={<AddIcon />} variant="contained" onClick={() => setSprintDialog({ open: true, item: null })} disabled={!selectedRequestId}>New Sprint</Button>}
-            {canSubmitPlanning && <Button startIcon={<SendOutlinedIcon />} variant="contained" color="success" onClick={submitPlanningPackage} disabled={!selectedRequestId}>Submit For Department Review</Button>}
+            {canManagePmWork && selectedProject?.status === 'PM_ASSIGNED' && (
+              <Tooltip title={canSubmitPlanning ? 'Submit scope and user stories together for Department HOD review.' : planningPackageBlockedReason}>
+                <span>
+                  <Button
+                    startIcon={<SendOutlinedIcon />}
+                    variant="contained"
+                    color="success"
+                    onClick={submitPlanningPackage}
+                    disabled={!selectedRequestId || !canSubmitPlanning}
+                  >
+                    Submit For Department Review
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
             <Button variant="outlined" onClick={() => { loadProjects(); loadProjectDetails(selectedRequestId); }}>Refresh</Button>
           </Stack>
         )}
@@ -372,9 +395,14 @@ export default function ProjectManagerWorkspace({ mode = 'dashboard' }) {
             </Box>
           ) : (
             <>
-              {mode === 'dashboard' && <DashboardContent projects={filteredProjects} summary={summary} scopes={scopes} stories={stories} sprints={sprints} tasks={selectedSprintTasks} canSubmitPlanning={canSubmitPlanning} onSubmitPlanning={submitPlanningPackage} />}
-              {mode === 'scopes' && <ScopeContent rows={scopes} onEdit={(item) => setScopeDialog({ open: true, item })} onSubmit={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/submit`), 'Scope submitted successfully.')} onApprove={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/approve`, { comment: 'Scope approved.' }), 'Scope approved successfully.')} onReject={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/reject`, { comment: 'Scope returned for rework.' }), 'Scope rejected successfully.')} canManage={canManagePmWork} canReview={canReviewScope} />}
-              {mode === 'stories' && <StoryContent rows={stories} onEdit={(item) => setStoryDialog({ open: true, item })} onSubmit={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/submit`), 'User story submitted successfully.')} onApprove={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/approve`, { comment: 'User story approved.' }), 'User story approved successfully.')} onReject={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/reject`, { comment: 'User story returned for rework.' }), 'User story rejected successfully.')} canManage={canManagePmWork} canReview={canReviewStories} />}
+              {mode === 'dashboard' && <DashboardContent projects={filteredProjects} summary={summary} scopes={scopes} stories={stories} sprints={sprints} tasks={selectedSprintTasks} canSubmitPlanning={canSubmitPlanning} planningPackageBlockedReason={planningPackageBlockedReason} onSubmitPlanning={submitPlanningPackage} />}
+              {mode === 'scopes' && scopes.length > 0 && stories.length === 0 && canManagePmWork && (
+                <Alert severity="info" icon={<InfoOutlinedIcon fontSize="inherit" />}>
+                  Scope saved. Create at least one user story before you can submit scope and stories together for Department HOD review.
+                </Alert>
+              )}
+              {mode === 'scopes' && <ScopeContent rows={scopes} storyCount={stories.length} onEdit={(item) => setScopeDialog({ open: true, item })} onApprove={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/approve`, { comment: 'Scope approved.' }), 'Scope approved successfully.')} onReject={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/scopes/${item.id}/reject`, { comment: 'Scope returned for rework.' }), 'Scope rejected successfully.')} canManage={canManagePmWork} canReview={canReviewScope} />}
+              {mode === 'stories' && <StoryContent rows={stories} onEdit={(item) => setStoryDialog({ open: true, item })} onApprove={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/approve`, { comment: 'User story approved.' }), 'User story approved successfully.')} onReject={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/user-stories/${item.id}/reject`, { comment: 'User story returned for rework.' }), 'User story rejected successfully.')} canManage={canManagePmWork} canReview={canReviewStories} />}
               {mode === 'sprints' && <SprintContent rows={sprints} onEdit={(item) => setSprintDialog({ open: true, item })} onStart={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/sprints/${item.id}/start`, { comment: 'Sprint started.' }), 'Sprint started successfully.')} onComplete={(item) => runAction(() => api.post(`/requests/${selectedRequestId}/sprints/${item.id}/complete`, { comment: 'Sprint completed.' }), 'Sprint completed successfully.')} canManage={canManagePmWork} />}
             </>
           )}
@@ -457,7 +485,7 @@ function ProjectSnapshot({ project, summary }) {
   );
 }
 
-function DashboardContent({ projects, summary, scopes, stories, sprints, tasks, canSubmitPlanning, onSubmitPlanning }) {
+function DashboardContent({ projects, summary, scopes, stories, sprints, tasks, canSubmitPlanning, planningPackageBlockedReason, onSubmitPlanning }) {
   return (
     <Stack spacing={2}>
       {canSubmitPlanning && (
@@ -465,7 +493,12 @@ function DashboardContent({ projects, summary, scopes, stories, sprints, tasks, 
           severity="info"
           action={<Button color="inherit" size="small" onClick={onSubmitPlanning}>Submit For Review</Button>}
         >
-          Create or update scope and user stories, then submit the planning package for Department HOD review.
+          Scope and user stories are ready. Submit the planning package together for Department HOD review.
+        </Alert>
+      )}
+      {!canSubmitPlanning && scopes.length > 0 && stories.length === 0 && (
+        <Alert severity="info" icon={<InfoOutlinedIcon fontSize="inherit" />}>
+          {planningPackageBlockedReason}
         </Alert>
       )}
       <Grid container spacing={1.5}>
@@ -500,7 +533,9 @@ function DashboardContent({ projects, summary, scopes, stories, sprints, tasks, 
   );
 }
 
-function ScopeContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, canReview }) {
+const PLANNING_SUBMIT_TOOLTIP = 'Scope and user stories must be submitted together from Submit For Department Review after you create at least one user story.';
+
+function ScopeContent({ rows, storyCount = 0, onEdit, onApprove, onReject, canManage, canReview }) {
   return (
     <ModulePanel title="Scope Definitions">
       <ResponsiveTable
@@ -518,7 +553,13 @@ function ScopeContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, 
             <TableCell>
               <RowActions>
                 {canManage && <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => onEdit(scope)}>Edit</Button>}
-                {canManage && <Button size="small" startIcon={<SendOutlinedIcon />} onClick={() => onSubmit(scope)} disabled={scope.status === 'APPROVED'}>Submit</Button>}
+                {canManage && scope.status !== 'APPROVED' && (
+                  <Tooltip title={storyCount > 0 ? PLANNING_SUBMIT_TOOLTIP : 'Create at least one user story, then submit scope and stories together using Submit For Department Review.'}>
+                    <IconButton size="small" color="info" aria-label="Planning submit guidance">
+                      <InfoOutlinedIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
                 {canReview && <Button size="small" color="success" onClick={() => onApprove(scope)} disabled={scope.status !== 'SUBMITTED'}>Approve</Button>}
                 {canReview && <Button size="small" color="error" onClick={() => onReject(scope)} disabled={scope.status !== 'SUBMITTED'}>Request Changes</Button>}
               </RowActions>
@@ -531,7 +572,7 @@ function ScopeContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, 
   );
 }
 
-function StoryContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, canReview }) {
+function StoryContent({ rows, onEdit, onApprove, onReject, canManage, canReview }) {
   return (
     <ModulePanel title="User Stories">
       <ResponsiveTable
@@ -549,7 +590,6 @@ function StoryContent({ rows, onEdit, onSubmit, onApprove, onReject, canManage, 
             <TableCell>
               <RowActions>
                 {canManage && <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => onEdit(story)}>Edit</Button>}
-                {canManage && <Button size="small" startIcon={<SendOutlinedIcon />} onClick={() => onSubmit(story)} disabled={story.status === 'APPROVED'}>Submit</Button>}
                 {canReview && <Button size="small" color="success" onClick={() => onApprove(story)} disabled={story.status !== 'SUBMITTED'}>Approve</Button>}
                 {canReview && <Button size="small" color="error" onClick={() => onReject(story)} disabled={story.status !== 'SUBMITTED'}>Request Changes</Button>}
               </RowActions>

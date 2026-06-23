@@ -25,8 +25,8 @@ router.get('/me', asyncHandler(async (req, res) => {
       { label: 'Team Assigned', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'ASSIGNED'", params) },
       { label: 'Requests In Progress', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status IN ('IN_DEVELOPMENT','DEVELOPMENT_COMPLETE')", params) },
       { label: 'Review & Validation', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'IN_TESTING'", params) },
-      { label: 'Final Approval', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params) },
-      { label: 'Completed', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'CLOSED'", params) },
+      { label: 'Requester UAT for Pre-Deployment', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params) },
+      { label: 'Sign-Off', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'CLOSED'", params) },
     );
   } else if (role === 'DEPARTMENT_HEAD') {
     cards.push(
@@ -38,7 +38,7 @@ router.get('/me', asyncHandler(async (req, res) => {
       { label: 'Team Assigned', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_department_id = :departmentId AND status = 'ASSIGNED'", params) },
       { label: 'Requests In Progress', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_department_id = :departmentId AND status IN ('IN_DEVELOPMENT','DEVELOPMENT_COMPLETE')", params) },
       { label: 'Review & Validation', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_department_id = :departmentId AND status = 'IN_TESTING'", params) },
-      { label: 'Completed', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_department_id = :departmentId AND status = 'CLOSED'", params) },
+      { label: 'Sign-Off', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_department_id = :departmentId AND status = 'CLOSED'", params) },
     );
   } else if (role === 'IT_HEAD') {
     cards.push(
@@ -49,8 +49,8 @@ router.get('/me', asyncHandler(async (req, res) => {
       { label: 'Average Completion %', value: await scalar("SELECT COALESCE(ROUND(AVG(progress_percentage)), 0) AS count FROM requests WHERE status IN ('ASSIGNED','IN_DEVELOPMENT','DEVELOPMENT_COMPLETE')", params) },
       { label: 'Requests Behind Schedule', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'IN_DEVELOPMENT' AND progress_percentage < 75 AND updated_at < DATE_SUB(NOW(), INTERVAL 5 DAY)", params) },
       { label: 'Review & Validation', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'IN_TESTING'", params) },
-      { label: 'Final Approval', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params) },
-      { label: 'Completed', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'CLOSED' AND it_head_user_id IS NOT NULL", params) },
+      { label: 'Requester UAT for Pre-Deployment', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params) },
+      { label: 'Sign-Off', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'CLOSED' AND it_head_user_id IS NOT NULL", params) },
     );
   } else if (role === 'DEVELOPER') {
     cards.push(
@@ -58,7 +58,7 @@ router.get('/me', asyncHandler(async (req, res) => {
       { label: 'Work In Progress', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.developer_user_id = :userId AND r.status = 'IN_DEVELOPMENT'", params) },
       { label: 'Ready To Start', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.developer_user_id = :userId AND r.status = 'ASSIGNED'", params) },
       { label: 'Overdue', value: 0 },
-      { label: 'Completed', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.developer_user_id = :userId AND r.status IN ('DEVELOPMENT_COMPLETE','IN_TESTING','UAT_PENDING','CLOSED')", params) },
+      { label: 'Sign-Off', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.developer_user_id = :userId AND r.status IN ('DEVELOPMENT_COMPLETE','IN_TESTING','UAT_PENDING','CLOSED')", params) },
     );
   } else if (role === 'QA') {
     cards.push(
@@ -66,11 +66,11 @@ router.get('/me', asyncHandler(async (req, res) => {
       { label: 'In Review', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.qa_user_id = :userId AND r.status = 'IN_TESTING'", params) },
       { label: 'Failed', value: await scalar("SELECT COUNT(*) AS count FROM test_results WHERE qa_user_id = :userId AND result IN ('FAIL','RETEST_REQUIRED')", params) },
       { label: 'Passed', value: await scalar("SELECT COUNT(*) AS count FROM test_results WHERE qa_user_id = :userId AND result = 'PASS'", params) },
-      { label: 'Pending Final Approval', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.qa_user_id = :userId AND r.status = 'UAT_PENDING'", params) },
+      { label: 'Requester UAT for Pre-Deployment', value: await scalar("SELECT COUNT(*) AS count FROM requests r JOIN assignments a ON a.request_id = r.id AND a.is_active = TRUE WHERE a.qa_user_id = :userId AND r.status = 'UAT_PENDING'", params) },
     );
   } else if (role === 'UAT_APPROVER') {
     cards.push(
-      { label: 'Pending Final Approval', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params) },
+      { label: 'Requester UAT for Pre-Deployment', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_PENDING'", params) },
       { label: 'Approved', value: await scalar("SELECT COUNT(*) AS count FROM uat_approvals WHERE uat_approver_user_id = :userId AND decision = 'APPROVED'", params) },
       { label: 'Rejected', value: await scalar("SELECT COUNT(*) AS count FROM uat_approvals WHERE uat_approver_user_id = :userId AND decision = 'REJECTED'", params) },
       { label: 'Returned for Changes', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE status = 'UAT_REJECTED'", params) },
@@ -82,7 +82,7 @@ router.get('/me', asyncHandler(async (req, res) => {
       { label: 'Waiting For Assignment', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_user_id = :userId AND status = 'ASSIGNMENT_PENDING'", params) },
       { label: 'Waiting For More Information', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_user_id = :userId AND status = 'CLARIFICATION_REQUESTED'", params) },
       { label: 'In Progress', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_user_id = :userId AND status IN ('ASSIGNED','IN_DEVELOPMENT','DEVELOPMENT_COMPLETE','IN_TESTING','UAT_PENDING')", params) },
-      { label: 'Completed', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_user_id = :userId AND status = 'CLOSED'", params) },
+      { label: 'Sign-Off', value: await scalar("SELECT COUNT(*) AS count FROM requests WHERE requester_user_id = :userId AND status = 'CLOSED'", params) },
     );
   }
 
