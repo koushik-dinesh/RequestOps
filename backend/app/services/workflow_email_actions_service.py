@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.workflows.request_workflow import NON_WITHDRAWABLE_STATUSES, can_requester_withdraw
+from app.workflows.request_permissions import NON_WITHDRAWABLE_STATUSES, can_requester_withdraw
 from app.core.database import one, rows
 from app.services.user_role_service import get_user_roles
 

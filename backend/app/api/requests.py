@@ -3157,7 +3157,7 @@ def withdraw_request_endpoint(request_id: int, payload: OptionalCommentPayload, 
     if int(user["id"]) != int(request_row["requester_user_id"]):
         raise ApiError(403, "Only the original requester can withdraw this request.")
     comment = payload.comment or "Request withdrawn by requester."
-    add_comment(db, request_row["id"], user["id"], "STATUS_UPDATE", comment)
+    add_comment(db, request_row["id"], user["id"], "GENERAL", comment)
     updated = withdraw_request(
         db,
         request_id=request_row["id"],

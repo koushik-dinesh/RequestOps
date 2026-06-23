@@ -7,13 +7,15 @@ from app.core.database import execute, one, rows
 from app.repositories.project_management_repository import delete_sprint
 from app.services.activity_service import audit
 from app.utils.http import ApiError
+from app.workflows.request_permissions import can_requester_withdraw
 
-NON_WITHDRAWABLE_STATUSES = frozenset({
-    "CLOSED",
-    "DEPARTMENT_REJECTED",
-    "IT_REJECTED",
-    "WITHDRAWN",
-})
+__all__ = [
+    "can_requester_withdraw",
+    "delete_request",
+    "get_request_by_id",
+    "transition_request",
+    "withdraw_request",
+]
 
 
 TRANSITIONS = {
@@ -62,12 +64,6 @@ def assert_transition(from_status: str, to_status: str) -> None:
     allowed = TRANSITIONS.get(from_status, [])
     if to_status != from_status and to_status not in allowed:
         raise ApiError(409, f"Cannot transition request from {from_status} to {to_status}.")
-
-
-def can_requester_withdraw(request_row: dict, user_id: int) -> bool:
-    if int(request_row.get("requester_user_id") or 0) != int(user_id):
-        return False
-    return request_row.get("status") not in NON_WITHDRAWABLE_STATUSES
 
 
 def withdraw_request(
