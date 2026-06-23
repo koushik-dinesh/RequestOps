@@ -52,7 +52,6 @@ import { PageSkeleton } from '../components/LoadingState';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
 import { formatEnum, missingReportingAuthorityText, priorities, terminalRequestStatuses } from '../utils/constants';
-import { AUTO_EXECUTE_WORKFLOW_ACTIONS, NAVIGATION_WORKFLOW_ACTIONS, WORKFLOW_ACTION_MESSAGES } from '../utils/workflowEmailActions';
 import { useToast } from '../components/ToastProvider';
 import violinLogoUrl from '../../../backend/app/assets/violin-technologies-logo.png';
 
@@ -476,6 +475,37 @@ function formatClarificationReason(value) {
   return clarificationReasons.find((reason) => reason.value === value)?.label || formatEnum(value);
 }
 
+const timelineActivityTitles = {
+  'DEPARTMENT_APPROVAL_PENDING->IT_REVIEW_PENDING': 'Department Approval Completed',
+  'CLARIFICATION_REQUESTED->IT_REVIEW_PENDING': 'Resubmitted For Internal Review',
+  'CLARIFICATION_REQUESTED->DEPARTMENT_APPROVAL_PENDING': 'Resubmitted For Department Review',
+  'SUBMITTED->DEPARTMENT_APPROVAL_PENDING': 'Submitted For Department Review',
+  'IT_REVIEW_PENDING->ASSIGNMENT_PENDING': 'Internal Review Completed',
+  'IT_REVIEW_PENDING->IT_REJECTED': 'Internal Review Rejected',
+  'IT_REVIEW_PENDING->DEFERRED': 'Internal Review Deferred',
+  'DEFERRED->IT_REVIEW_PENDING': 'Internal Review Resumed',
+  'ASSIGNMENT_PENDING->PM_ASSIGNED': 'Project Manager Assigned',
+};
+
+function getTimelineActivityTitle(item) {
+  if (item.comment?.includes('Progress Updated')) return 'Progress Updated';
+  const transitionKey = `${item.from_status || ''}->${item.to_status || ''}`;
+  if (timelineActivityTitles[transitionKey]) return timelineActivityTitles[transitionKey];
+  if (item.to_status === 'IT_REVIEW_PENDING') return 'Sent To Internal Review';
+  if (item.to_status === 'ASSIGNMENT_PENDING') return 'Awaiting Project Manager Assignment';
+  return formatEnum(item.to_status);
+}
+
+function getWorkflowStatusCaption(status) {
+  if (status === 'IT_REVIEW_PENDING') return 'Feasibility Assessment Required';
+  if (status === 'ASSIGNMENT_PENDING') return 'Awaiting Project Manager Assignment';
+  if (status === 'ASSIGNED') return 'Team Assigned';
+  if (status === 'DEPARTMENT_APPROVAL_PENDING') return 'Awaiting Department Decision';
+  if (status === 'CLARIFICATION_REQUESTED') return 'Awaiting Requester Response';
+  if (status === 'DEFERRED') return 'Deferred';
+  return 'Awaiting Decision';
+}
+
 function getProgressStatusLabel(value = 0) {
   const progress = Number(value || 0);
   if (progress >= 100) return 'Ready for Review';
@@ -573,9 +603,6 @@ export default function RequestDetailPage() {
   const [roiEditing, setRoiEditing] = useState(false);
   const [roiForm, setRoiForm] = useState(normalizeRoiFromRequest(null));
   const [reportOpen, setReportOpen] = useState(false);
-  const [pendingWorkflowAction, setPendingWorkflowAction] = useState('');
-  const [preselectedWorkflowAction, setPreselectedWorkflowAction] = useState('');
-  const [preselectedRequirementsAction, setPreselectedRequirementsAction] = useState('');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteReason, setDeleteReason] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -647,73 +674,12 @@ export default function RequestDetailPage() {
   }, [id, user?.roleCode]);
 
   useEffect(() => {
-    if (!workflowAction || !request) return;
-    setPendingWorkflowAction(workflowAction);
-
-    async function handleEmailWorkflowAction() {
-      try {
-        const actions = await api.get(`/requests/${id}/workflow-actions`);
-        if (!actions.some((item) => item.id === workflowAction)) {
-          showToast('This email action is not available for your role or the current request stage.', { severity: 'warning' });
-          setPendingWorkflowAction('');
-          clearWorkflowActionParam();
-          return;
-        }
-
-        if (NAVIGATION_WORKFLOW_ACTIONS[workflowAction]) {
-          navigate(NAVIGATION_WORKFLOW_ACTIONS[workflowAction]);
-          setPendingWorkflowAction('');
-          clearWorkflowActionParam();
-          return;
-        }
-
-        if (AUTO_EXECUTE_WORKFLOW_ACTIONS.has(workflowAction)) {
-          const autoActions = {
-            'department-approve': ['/department-approval/approve', { comment: '' }],
-            'it-resume': ['/it-review/resume', { comment: '' }],
-            'uat-approve': ['/uat/approve', { comments: '' }],
-            'start-development': ['/development/start', {}],
-            'requirements-approve': ['/requirements-review/approve', { comment: '' }],
-          };
-          const [path, payload] = autoActions[workflowAction] || [];
-          if (path) {
-            await api.post(`/requests/${id}${path}`, payload);
-            showToast(WORKFLOW_ACTION_MESSAGES[workflowAction] || 'Workflow action completed from email.', { severity: 'success' });
-            setPendingWorkflowAction('');
-            setPreselectedWorkflowAction('');
-            setPreselectedRequirementsAction('');
-            clearWorkflowActionParam();
-            await load();
-          }
-          return;
-        }
-
-        if (workflowAction === 'requirements-request-clarification') {
-          setPreselectedRequirementsAction('clarification');
-          setPendingWorkflowAction('');
-          clearWorkflowActionParam();
-          showToast('Requirements clarification selected from your email. Add a note in the Requirement Review section and submit.', { severity: 'info' });
-          window.setTimeout(() => {
-            document.getElementById('requirements-review-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }, 250);
-          return;
-        }
-
-        setPreselectedWorkflowAction(workflowAction);
-        setPendingWorkflowAction('');
-        clearWorkflowActionParam();
-        showToast('Action selected from your email. Complete the required details and submit your decision.', { severity: 'info' });
-      } catch (err) {
-        showToast(err.message || 'Unable to complete the email workflow action.', { severity: 'error' });
-        setPendingWorkflowAction('');
-        setPreselectedWorkflowAction('');
-        setPreselectedRequirementsAction('');
-        clearWorkflowActionParam();
-      }
-    }
-
-    handleEmailWorkflowAction();
-  }, [workflowAction, request?.id, request?.status, id, user?.roleCode]);
+    if (!workflowAction) return;
+    clearWorkflowActionParam();
+    window.setTimeout(() => {
+      document.getElementById('workflow-actions-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
+  }, [workflowAction]);
 
   async function runAction(path, payload = {}, successMessage = 'Action completed.') {
     setError('');
@@ -960,8 +926,6 @@ export default function RequestDetailPage() {
                 scopes={planningScopes}
                 stories={planningStories}
                 requirementsReview={requirementsReview}
-                preselectedRequirementsAction={preselectedRequirementsAction}
-                onRequirementsActionConsumed={() => setPreselectedRequirementsAction('')}
                 onRefresh={load}
                 showToast={showToast}
                 setError={setError}
@@ -1027,6 +991,7 @@ export default function RequestDetailPage() {
             </Box>
 
             <Box
+              id="workflow-actions-panel"
               sx={{
                 order: { xs: 2, lg: 6 },
                 position: { xs: 'sticky', lg: 'static' },
@@ -1059,7 +1024,6 @@ export default function RequestDetailPage() {
                 timeline={timeline}
                 navigate={navigate}
                 showToast={showToast}
-                preselectedActionId={preselectedWorkflowAction}
               />
             </Box>
 
@@ -4534,7 +4498,7 @@ const workflowMilestoneLabels = {
   DEPARTMENT_APPROVAL_PENDING: 'Department Review',
   CLARIFICATION_REQUESTED: 'Clarification Requested',
   DEPARTMENT_REJECTED: 'Department Rejected',
-  IT_REVIEW_PENDING: 'Department Approved',
+  IT_REVIEW_PENDING: 'Internal Review Started',
   IT_REJECTED: 'IT Rejected',
   DEFERRED: 'Deferred',
   ASSIGNMENT_PENDING: 'IT Approved',
@@ -5110,7 +5074,7 @@ function RecentActivity({ items, clarifications }) {
   const statusActivities = items.map((item) => ({
     id: `status-${item.id}`,
     kind: 'status',
-    title: item.comment?.includes('Progress Updated') ? 'Progress Updated' : formatEnum(item.to_status),
+    title: getTimelineActivityTitle(item),
     actor: item.changed_by_name,
     comment: item.comment,
     date: item.changed_at,
@@ -6245,7 +6209,8 @@ function WorkflowActions(props) {
   const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
-    setSelectedActionId(preselectedActionId || '');
+    const defaultActionId = preselectedActionId || (canReviewIt ? 'it-approve' : '');
+    setSelectedActionId(defaultActionId);
     setActionComment('');
     setClarificationDetails({ reasonCategory: 'MISSING_REQUIREMENTS', note: '' });
     setQaReworkTasks([{ title: '', description: '', priority: 'HIGH' }]);
@@ -6268,7 +6233,7 @@ function WorkflowActions(props) {
         notes: '',
       });
     }
-  }, [request.id, request.status, request.project_manager_user_id, request.active_assignment_id, request.active_developer_user_id, request.active_qa_user_id, preselectedActionId, setActionComment, setAssignment, setTestResult]);
+  }, [request.id, request.status, request.project_manager_user_id, request.active_assignment_id, request.active_developer_user_id, request.active_qa_user_id, preselectedActionId, canReviewIt, setActionComment, setAssignment, setTestResult]);
 
   if (!hasActions && !preselectedActionId) {
     return null;
@@ -6747,11 +6712,7 @@ function WorkflowActions(props) {
             <Grid size={{ xs: 6 }}>
               <Typography variant="caption" color="text.secondary">Status</Typography>
               <Typography variant="caption" fontWeight={820} sx={{ display: 'block' }}>
-                {request.status === 'ASSIGNMENT_PENDING'
-                  ? 'Awaiting Assignment'
-                  : request.status === 'ASSIGNED'
-                    ? 'Team Assigned'
-                    : 'Awaiting Decision'}
+                {getWorkflowStatusCaption(request.status)}
               </Typography>
             </Grid>
           </Grid>
@@ -6761,6 +6722,31 @@ function WorkflowActions(props) {
           <EmptyInline message="No workflow actions are available for your role at this stage." />
         ) : (
           <Stack spacing={1}>
+            {canReviewIt && (
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 1.75,
+                  border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}`,
+                  bgcolor: (theme) => theme.custom.semantic.paper,
+                }}
+              >
+                <Stack spacing={1.35}>
+                  <Typography variant="subtitle2" fontWeight={900}>Feasibility Assessment</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Internal review is not complete until you submit feasibility details with your approval decision.
+                  </Typography>
+                  <TextField label="Feasibility Notes" value={review.feasibilityNotes} onChange={(e) => setReview({ ...review, feasibilityNotes: e.target.value })} multiline minRows={3} required />
+                  <TextField label="Complexity" select value={review.complexity} onChange={(e) => setReview({ ...review, complexity: e.target.value })} required>
+                    {['LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH'].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                  </TextField>
+                  <TextField label="Estimated Effort" value={review.estimatedEffort} onChange={(e) => setReview({ ...review, estimatedEffort: e.target.value })} required />
+                  <TextField label="Priority Confirmation" select value={review.priorityConfirmation} onChange={(e) => setReview({ ...review, priorityConfirmation: e.target.value })} required>
+                    {priorities.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
+                  </TextField>
+                </Stack>
+              </Box>
+            )}
             {actionGroups.map((action) => (
               <DecisionCard
                 key={action.id}
@@ -6790,19 +6776,6 @@ function WorkflowActions(props) {
               <Typography variant="subtitle2" fontWeight={900}>{selectedAction.label} Selected</Typography>
               {selectedAction.helper && (
                 <Typography variant="caption" color="text.secondary">{selectedAction.helper}</Typography>
-              )}
-
-              {selectedAction.itReview && (
-                <>
-                  <TextField label="Feasibility Notes" value={review.feasibilityNotes} onChange={(e) => setReview({ ...review, feasibilityNotes: e.target.value })} />
-                  <TextField label="Complexity" select value={review.complexity} onChange={(e) => setReview({ ...review, complexity: e.target.value })}>
-                    {['LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH'].map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-                  </TextField>
-                  <TextField label="Estimated Effort" value={review.estimatedEffort} onChange={(e) => setReview({ ...review, estimatedEffort: e.target.value })} />
-                  <TextField label="Priority Confirmation" select value={review.priorityConfirmation} onChange={(e) => setReview({ ...review, priorityConfirmation: e.target.value })}>
-                    {priorities.map((value) => <MenuItem key={value} value={value}>{value}</MenuItem>)}
-                  </TextField>
-                </>
               )}
 
               {selectedAction.assignment && (

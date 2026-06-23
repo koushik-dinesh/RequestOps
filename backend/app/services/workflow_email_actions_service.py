@@ -25,24 +25,14 @@ def _is_admin(role_code: str | None) -> bool:
     return role_code == "SYSTEM_ADMIN"
 
 
-NAVIGATION_ACTION_PATHS = {
-    "open-scope-management": "/project-scopes",
-    "open-story-management": "/user-stories",
-}
 
-
-def _request_url(request_id: int, action_id: str | None = None) -> str:
-    base = f"{settings.public_app_base_url.rstrip('/')}/requests/{request_id}"
-    if action_id:
-        return f"{base}?workflowAction={action_id}"
-    return base
+def _request_url(request_id: int) -> str:
+    return f"{settings.public_app_base_url.rstrip('/')}/requests/{request_id}"
 
 
 def _action_url(request_id: int, action_id: str) -> str:
-    navigation_path = NAVIGATION_ACTION_PATHS.get(action_id)
-    if navigation_path:
-        return f"{settings.public_app_base_url.rstrip('/')}{navigation_path}"
-    return _request_url(request_id, action_id)
+    """Email buttons open the request in RequestOps; actions run only in the app."""
+    return _request_url(request_id)
 
 
 def _is_department_head_for_request(request_row: dict, user_id: int) -> bool:
@@ -135,34 +125,32 @@ def _actions_for_role(db: Session, request_row: dict, role_code: str, user_id: i
     request_id = int(request_row["id"])
     actions: list[dict] = []
 
-    def add(action_id: str, label: str, tone: str, *, auto_execute: bool = False, requires_comment: bool = False) -> None:
+    def add(action_id: str, label: str, tone: str) -> None:
         actions.append({
             "id": action_id,
             "label": label,
             "tone": tone,
-            "autoExecute": auto_execute,
-            "requiresComment": requires_comment,
             "url": _action_url(request_id, action_id),
         })
 
     if status == "DEPARTMENT_APPROVAL_PENDING" and (
         is_admin or (role_code == "DEPARTMENT_HEAD" and _is_department_head_for_request(request_row, user_id))
     ):
-        add("department-approve", "Approve", "success", auto_execute=True)
+        add("department-approve", "Approve", "success")
         add("department-clarify", "Request Details", "warning")
-        add("department-reject", "Reject", "error", requires_comment=True)
+        add("department-reject", "Reject", "error")
 
     if status == "CLARIFICATION_REQUESTED" and _is_requester(request_row, user_id):
-        add("clarification-respond", "Respond and Resubmit", "success", requires_comment=True)
+        add("clarification-respond", "Respond and Resubmit", "success")
 
     if status == "IT_REVIEW_PENDING" and (role_code == "IT_HEAD" or is_admin):
         add("it-approve", "Approve", "success")
         add("it-clarify", "Request Clarification", "warning")
-        add("it-reject", "Reject", "error", requires_comment=True)
-        add("it-defer", "Defer", "neutral", requires_comment=True)
+        add("it-reject", "Reject", "error")
+        add("it-defer", "Defer", "neutral")
 
     if status == "DEFERRED" and (role_code == "IT_HEAD" or is_admin):
-        add("it-resume", "Resume Deferred Request", "success", auto_execute=True)
+        add("it-resume", "Resume Deferred Request", "success")
 
     if status in {"ASSIGNMENT_PENDING", "PM_ASSIGNED"} and (role_code == "IT_HEAD" or is_admin):
         label = "Change Project Manager" if request_row.get("project_manager_user_id") else "Assign Project Manager"
@@ -176,10 +164,10 @@ def _actions_for_role(db: Session, request_row: dict, role_code: str, user_id: i
 
     if _can_review_requirements(request_row, role_code, user_id, is_admin):
         if status == "REQUIREMENTS_DEPARTMENT_REVIEW":
-            add("requirements-approve", "Approve Requirements", "success", auto_execute=True)
-            add("requirements-request-clarification", "Request Clarification From PM", "warning", requires_comment=True)
+            add("requirements-approve", "Approve Requirements", "success")
+            add("requirements-request-clarification", "Request Clarification From PM", "warning")
         else:
-            add("requirements-approve", "Approve Revision", "success", auto_execute=True)
+            add("requirements-approve", "Approve Revision", "success")
 
     if status == "IN_DEVELOPMENT":
         developer_complete = _developer_tasks_complete(db, request_id, user_id)
@@ -201,7 +189,7 @@ def _actions_for_role(db: Session, request_row: dict, role_code: str, user_id: i
         add("send-requester-testing", "Send To Requester Testing", "success")
 
     if status == "UAT_PENDING" and (is_admin or _is_requester(request_row, user_id)):
-        add("uat-approve", "Approve User Testing", "success", auto_execute=True)
+        add("uat-approve", "Approve User Testing", "success")
 
     if status in {"UAT_APPROVED", "DEPLOYMENT_PENDING"} and (role_code == "PROJECT_MANAGER" or is_admin):
         add("complete-deployment", "Complete Deployment", "success")
@@ -210,10 +198,10 @@ def _actions_for_role(db: Session, request_row: dict, role_code: str, user_id: i
         add("requester-complete", "Complete Request", "success")
 
     if status == "DEPLOYED" and (role_code in {"PROJECT_MANAGER", "IT_HEAD"} or is_admin):
-        add("close-request", "Close Request", "success", requires_comment=True)
+        add("close-request", "Close Request", "success")
 
     if can_requester_withdraw(request_row, user_id):
-        add("withdraw-request", "Withdraw Request", "error", requires_comment=True)
+        add("withdraw-request", "Withdraw Request", "error")
 
     return actions
 
@@ -226,9 +214,7 @@ def get_workflow_actions_for_recipient(db: Session, recipient_user_id: int, requ
     merged: dict[str, dict] = {}
     for role_code in _recipient_role_codes(db, recipient_user_id):
         for action in _actions_for_role(db, request_row, role_code, recipient_user_id):
-            existing = merged.get(action["id"])
-            if not existing or (action["autoExecute"] and not existing.get("autoExecute")):
-                merged[action["id"]] = action
+            merged[action["id"]] = action
     return list(merged.values())
 
 
@@ -271,7 +257,7 @@ def render_workflow_action_buttons_html(request_id: int, actions: list[dict]) ->
         {''.join(rows)}
       </table>
       <p style="margin:10px 0 0;color:#64748b;font-size:12px;line-height:1.55;">
-        Select an action to open RequestOps. You may be asked to sign in first. Actions that need notes will open the request with the selected action ready to complete.
+        Open the request in RequestOps to review details and complete your decision. You may be asked to sign in first. Workflow actions are completed only inside the application.
       </p>
     </div>
     """

@@ -1436,7 +1436,7 @@ def department_approve(request_id: int, payload: OptionalCommentPayload, request
     head_id = assert_can_act_as_department_head(db, user, request_row)
     it_head_id = resolve_request_it_head_id(db, request_row)
     add_comment(db, request_row["id"], user["id"], "APPROVAL", payload.comment)
-    updated = transition_request(db, request_id=request_row["id"], to_status="IT_REVIEW_PENDING", actor_user_id=user["id"], comment=payload.comment or "Department approved.", request_context=request_context, patch={"department_head_user_id": head_id, "it_head_user_id": it_head_id, "current_assignee_user_id": it_head_id})
+    updated = transition_request(db, request_id=request_row["id"], to_status="IT_REVIEW_PENDING", actor_user_id=user["id"], comment=payload.comment or "Department approval completed. Request forwarded to internal review.", request_context=request_context, patch={"department_head_user_id": head_id, "it_head_user_id": it_head_id, "current_assignee_user_id": it_head_id})
     notify(db, recipient_user_id=it_head_id, request_id=request_row["id"], type="REQUEST_IT_REVIEW_PENDING", title="Request awaiting internal review", message=f"{request_row['request_number']} has been approved by the department and is ready for internal review.", background_tasks=background_tasks)
     db.commit()
     return ok(updated)
