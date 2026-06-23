@@ -40,7 +40,7 @@ app.get('/health', async (_req, res) => {
 });
 
 app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/panel', adminRoutes);
 app.use('/api/v1/users', usersRoutes);
 app.use('/api/v1/departments', departmentsRoutes);
 app.use('/api/v1/requests', requestsRoutes);

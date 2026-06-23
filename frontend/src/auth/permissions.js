@@ -25,7 +25,7 @@ export const routePermissions = {
   '/uat': [roles.PROJECT_MANAGER, roles.UAT, roles.ADMIN],
   '/notifications': ['*'],
   '/manual': ['*'],
-  '/admin': [roles.ADMIN],
+  '/panel': [roles.ADMIN],
 };
 
 export function canAccess(roleCode, allowedRoles = []) {

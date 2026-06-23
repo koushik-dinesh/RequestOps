@@ -56,7 +56,7 @@ import {
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { canAccess, canCreateRequest, routePermissions } from '../auth/permissions';
-import { roleLabels } from '../utils/constants';
+import { panelRoute, requestableRoleCodes, roleLabels, roleRequestLabels } from '../utils/constants';
 import api from '../api/client';
 import { useThemeMode } from '../theme/ThemeModeProvider';
 import { formatRelativeTime, getNotificationMeta } from '../utils/notifications';
@@ -96,7 +96,7 @@ const navGroups = [
       { label: 'Notifications', path: '/notifications', icon: Bell, route: '/notifications' },
       { label: 'User Manual', path: '/manual', icon: BookOpen, route: '/manual' },
       { label: 'Daily Progress Reports', path: '/daily-progress-reports', icon: ClipboardList, route: '/daily-progress-reports' },
-      { label: 'Admin', path: '/admin', icon: ShieldCheck, route: '/admin' },
+      { label: 'Admin', path: panelRoute, icon: ShieldCheck, route: panelRoute },
     ],
   },
 ];
@@ -105,7 +105,7 @@ function getRoleAwareNavLabel(item, roleCode) {
   if (item.path === '/requests' && roleCode === 'EMPLOYEE') return 'My Requests';
   if (item.path === '/requests' && ['DEVELOPER', 'QA', 'UAT_APPROVER'].includes(roleCode)) return 'Assigned Requests';
   if (item.path === '/developer-workload') return 'Developer Workload';
-  if (item.path === '/admin') return 'Admin Console';
+  if (item.path === panelRoute) return 'Admin Console';
   return item.label;
 }
 
@@ -152,7 +152,7 @@ export default function AppLayout() {
   const availableRoles = user?.availableRoles || [];
   const pendingRoleRequests = user?.pendingRoleRequests || [];
   const hasMultipleRoles = availableRoles.length > 1;
-  const requestableRoleCodes = Object.keys(roleLabels).filter(
+  const requestableRoleOptions = requestableRoleCodes.filter(
     (code) => !availableRoles.some((role) => role.code === code) && !pendingRoleRequests.includes(code),
   );
 
@@ -577,15 +577,15 @@ export default function AppLayout() {
               onChange={(event) => setRoleRequestCode(event.target.value)}
               fullWidth
               helperText={
-                requestableRoleCodes.length === 0
+                requestableRoleOptions.length === 0
                   ? 'You already hold all assignable roles or have pending requests for the remaining roles.'
                   : pendingRoleRequests.length > 0
                     ? 'Roles with a pending request are hidden until they are reviewed.'
                     : ''
               }
             >
-              {requestableRoleCodes.map((code) => (
-                <MenuItem key={code} value={code}>{roleLabels[code]}</MenuItem>
+              {requestableRoleOptions.map((code) => (
+                <MenuItem key={code} value={code}>{roleRequestLabels[code] || roleLabels[code]}</MenuItem>
               ))}
             </TextField>
             <TextField

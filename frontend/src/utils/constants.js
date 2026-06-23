@@ -9,6 +9,30 @@ export const roleLabels = {
   UAT_APPROVER: 'Final Approver',
 };
 
+/** Roles users may request via profile → New Role Access Request (excludes System Admin). */
+export const requestableRoleCodes = [
+  'EMPLOYEE',
+  'DEPARTMENT_HEAD',
+  'IT_HEAD',
+  'PROJECT_MANAGER',
+  'DEVELOPER',
+  'QA',
+  'UAT_APPROVER',
+];
+
+/** Friendly labels for the role access request dropdown. */
+export const roleRequestLabels = {
+  ...roleLabels,
+  DEVELOPER: 'Developer',
+};
+
+/** System console route and API prefix (CloudFront-safe; avoids "admin" in URLs). */
+export const panelRoute = '/panel';
+export const panelApiPrefix = '/panel';
+
+/** Request statuses where workflow actions are no longer allowed. */
+export const terminalRequestStatuses = ['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED', 'WITHDRAWN'];
+
 export const requestTypes = [
   'NEW_FEATURE',
   'ENHANCEMENT',
@@ -30,6 +54,7 @@ export const statusLabels = {
   DEPARTMENT_REJECTED: 'Department Rejected',
   IT_REVIEW_PENDING: 'Internal Review Pending',
   IT_REJECTED: 'Internal Review Rejected',
+  WITHDRAWN: 'Withdrawn',
   DEFERRED: 'Deferred',
   ASSIGNMENT_PENDING: 'Waiting For Assignment',
   PM_ASSIGNED: 'Project Manager Assigned',

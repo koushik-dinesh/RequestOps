@@ -22,7 +22,7 @@ const bareAppRoutePrefixes = [
   '/uat',
   '/notifications',
   '/manual',
-  '/admin',
+  '/panel',
 ];
 
 function shouldRedirectToAppBase(urlPath) {

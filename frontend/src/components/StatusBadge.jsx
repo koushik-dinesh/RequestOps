@@ -40,6 +40,7 @@ const stylesByValue = {
   CLOSED: { color: '#15803D', bg: '#DCFCE7', border: '#86EFAC' },
   DEPARTMENT_REJECTED: { color: '#B91C1C', bg: '#FEE2E2', border: '#FCA5A5' },
   IT_REJECTED: { color: '#B91C1C', bg: '#FEE2E2', border: '#FCA5A5' },
+  WITHDRAWN: { color: '#64748B', bg: '#F1F5F9', border: '#CBD5E1' },
   TEST_FAILED: { color: '#B91C1C', bg: '#FEE2E2', border: '#FCA5A5' },
   UAT_REJECTED: { color: '#B91C1C', bg: '#FEE2E2', border: '#FCA5A5' },
   DEFERRED: { color: '#92400E', bg: '#FEF3C7', border: '#FCD34D' },

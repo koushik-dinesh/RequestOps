@@ -65,8 +65,8 @@ export default function App() {
           </Route>
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/manual" element={<UserManualPage />} />
-          <Route element={<RoleRoute roles={routePermissions['/admin']} />}>
-            <Route path="/admin" element={<AdminPage />} />
+          <Route element={<RoleRoute roles={routePermissions['/panel']} />}>
+            <Route path="/panel" element={<AdminPage />} />
           </Route>
         </Route>
       </Route>
