@@ -44,14 +44,15 @@ import TrendingUpRoundedIcon from '@mui/icons-material/TrendingUpRounded';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { CheckCircle2, CircleHelp, PauseCircle, PlayCircle, Send, XCircle } from 'lucide-react';
 import jsPDF from 'jspdf';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import StatusBadge from '../components/StatusBadge';
 import { PageSkeleton } from '../components/LoadingState';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
-import { formatEnum, missingReportingAuthorityText, priorities } from '../utils/constants';
+import { formatEnum, missingReportingAuthorityText, priorities, terminalRequestStatuses } from '../utils/constants';
+import { AUTO_EXECUTE_WORKFLOW_ACTIONS, NAVIGATION_WORKFLOW_ACTIONS, WORKFLOW_ACTION_MESSAGES } from '../utils/workflowEmailActions';
 import { useToast } from '../components/ToastProvider';
 import violinLogoUrl from '../../../backend/app/assets/violin-technologies-logo.png';
 
@@ -237,6 +238,7 @@ const workflowSuccessMessages = {
   '/deployment/complete': 'Deployment completed. Requester confirmation is now required.',
   '/requester/complete': 'Request completed successfully.',
   '/close': 'Request closed successfully.',
+  '/withdraw': 'Request withdrawn successfully.',
 };
 
 const notificationActionPaths = new Set([
@@ -448,6 +450,9 @@ function daysBetween(value) {
 }
 
 function getCurrentWorkflowStep(status) {
+  if (status === 'WITHDRAWN') {
+    return { label: 'Withdrawn', description: 'Request withdrawn by requester' };
+  }
   if (status === 'CLARIFICATION_REQUESTED') {
     return { label: 'Waiting For More Information', description: 'Requester response required' };
   }
@@ -537,6 +542,8 @@ function canEditRoiInformation(request, user) {
 export default function RequestDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const workflowAction = searchParams.get('workflowAction');
   const { user } = useAuth();
   const { showToast } = useToast();
   const theme = useTheme();
@@ -566,6 +573,19 @@ export default function RequestDetailPage() {
   const [roiEditing, setRoiEditing] = useState(false);
   const [roiForm, setRoiForm] = useState(normalizeRoiFromRequest(null));
   const [reportOpen, setReportOpen] = useState(false);
+  const [pendingWorkflowAction, setPendingWorkflowAction] = useState('');
+  const [preselectedWorkflowAction, setPreselectedWorkflowAction] = useState('');
+  const [preselectedRequirementsAction, setPreselectedRequirementsAction] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  function clearWorkflowActionParam() {
+    if (!searchParams.get('workflowAction')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('workflowAction');
+    setSearchParams(next, { replace: true });
+  }
 
   const developers = useMemo(() => users.filter((row) => row.status === 'ACTIVE' && row.role_code === 'DEVELOPER'), [users]);
   const projectManagers = useMemo(() => users.filter((row) => row.status === 'ACTIVE' && row.role_code === 'PROJECT_MANAGER'), [users]);
@@ -584,7 +604,7 @@ export default function RequestDetailPage() {
     .filter((item) => item.status === 'RESOLVED' && item.response_note)
     .sort((a, b) => new Date(b.responded_at || 0) - new Date(a.responded_at || 0))[0], [clarifications]);
   const showWorkflowProgress = useMemo(() => hasDevelopmentVisibility(request), [request]);
-  const isCompletedRequest = request?.status === 'CLOSED';
+  const isCompletedRequest = ['CLOSED', 'WITHDRAWN'].includes(request?.status);
   const canEditRoi = useMemo(() => {
     return canEditRoiInformation(request, user);
   }, [request, user]);
@@ -625,6 +645,75 @@ export default function RequestDetailPage() {
       setDeveloperWorkloads([]);
     }
   }, [id, user?.roleCode]);
+
+  useEffect(() => {
+    if (!workflowAction || !request) return;
+    setPendingWorkflowAction(workflowAction);
+
+    async function handleEmailWorkflowAction() {
+      try {
+        const actions = await api.get(`/requests/${id}/workflow-actions`);
+        if (!actions.some((item) => item.id === workflowAction)) {
+          showToast('This email action is not available for your role or the current request stage.', { severity: 'warning' });
+          setPendingWorkflowAction('');
+          clearWorkflowActionParam();
+          return;
+        }
+
+        if (NAVIGATION_WORKFLOW_ACTIONS[workflowAction]) {
+          navigate(NAVIGATION_WORKFLOW_ACTIONS[workflowAction]);
+          setPendingWorkflowAction('');
+          clearWorkflowActionParam();
+          return;
+        }
+
+        if (AUTO_EXECUTE_WORKFLOW_ACTIONS.has(workflowAction)) {
+          const autoActions = {
+            'department-approve': ['/department-approval/approve', { comment: '' }],
+            'it-resume': ['/it-review/resume', { comment: '' }],
+            'uat-approve': ['/uat/approve', { comments: '' }],
+            'start-development': ['/development/start', {}],
+            'requirements-approve': ['/requirements-review/approve', { comment: '' }],
+          };
+          const [path, payload] = autoActions[workflowAction] || [];
+          if (path) {
+            await api.post(`/requests/${id}${path}`, payload);
+            showToast(WORKFLOW_ACTION_MESSAGES[workflowAction] || 'Workflow action completed from email.', { severity: 'success' });
+            setPendingWorkflowAction('');
+            setPreselectedWorkflowAction('');
+            setPreselectedRequirementsAction('');
+            clearWorkflowActionParam();
+            await load();
+          }
+          return;
+        }
+
+        if (workflowAction === 'requirements-request-clarification') {
+          setPreselectedRequirementsAction('clarification');
+          setPendingWorkflowAction('');
+          clearWorkflowActionParam();
+          showToast('Requirements clarification selected from your email. Add a note in the Requirement Review section and submit.', { severity: 'info' });
+          window.setTimeout(() => {
+            document.getElementById('requirements-review-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 250);
+          return;
+        }
+
+        setPreselectedWorkflowAction(workflowAction);
+        setPendingWorkflowAction('');
+        clearWorkflowActionParam();
+        showToast('Action selected from your email. Complete the required details and submit your decision.', { severity: 'info' });
+      } catch (err) {
+        showToast(err.message || 'Unable to complete the email workflow action.', { severity: 'error' });
+        setPendingWorkflowAction('');
+        setPreselectedWorkflowAction('');
+        setPreselectedRequirementsAction('');
+        clearWorkflowActionParam();
+      }
+    }
+
+    handleEmailWorkflowAction();
+  }, [workflowAction, request?.id, request?.status, id, user?.roleCode]);
 
   async function runAction(path, payload = {}, successMessage = 'Action completed.') {
     setError('');
@@ -744,13 +833,39 @@ export default function RequestDetailPage() {
     api.post(`/requests/${id}/report/audit`).catch(() => {});
   }
 
+  const canDeleteRequest = user?.roleCode === 'SYSTEM_ADMIN';
+
+  async function submitDeleteRequest() {
+    if (deleteReason.trim().length < 3) return;
+    setDeleteBusy(true);
+    setError('');
+    try {
+      await api.post(`/requests/${id}/delete`, { comment: deleteReason.trim() });
+      showToast('Request deleted successfully.');
+      navigate('/requests');
+    } catch (err) {
+      setError(err.message);
+      setDeleteBusy(false);
+    }
+  }
+
   if (!request) return <PageSkeleton />;
 
   return (
     <Page maxWidth={1560}>
       {error && <Alert severity="error">{error}</Alert>}
 
-      <WorkItemHeader request={request} canEdit={canEditDetails} onEdit={openDetailsDialog} onViewReport={openReport} />
+      <WorkItemHeader
+        request={request}
+        canEdit={canEditDetails}
+        onEdit={openDetailsDialog}
+        onViewReport={openReport}
+        canDelete={canDeleteRequest}
+        onDelete={() => {
+          setDeleteReason('');
+          setDeleteDialogOpen(true);
+        }}
+      />
 
       <Box
         sx={{
@@ -845,6 +960,8 @@ export default function RequestDetailPage() {
                 scopes={planningScopes}
                 stories={planningStories}
                 requirementsReview={requirementsReview}
+                preselectedRequirementsAction={preselectedRequirementsAction}
+                onRequirementsActionConsumed={() => setPreselectedRequirementsAction('')}
                 onRefresh={load}
                 showToast={showToast}
                 setError={setError}
@@ -942,6 +1059,7 @@ export default function RequestDetailPage() {
                 timeline={timeline}
                 navigate={navigate}
                 showToast={showToast}
+                preselectedActionId={preselectedWorkflowAction}
               />
             </Box>
 
@@ -985,11 +1103,61 @@ export default function RequestDetailPage() {
         onClose={() => setReportOpen(false)}
         fullScreen={isMobileLayout}
       />
+      <DeleteRequestDialog
+        open={deleteDialogOpen}
+        request={request}
+        reason={deleteReason}
+        setReason={setDeleteReason}
+        busy={deleteBusy}
+        onClose={() => {
+          if (!deleteBusy) {
+            setDeleteDialogOpen(false);
+            setDeleteReason('');
+          }
+        }}
+        onSubmit={submitDeleteRequest}
+        fullScreen={isMobileLayout}
+      />
     </Page>
   );
 }
 
-function WorkItemHeader({ request, canEdit, onEdit, onViewReport }) {
+function DeleteRequestDialog({ open, request, reason, setReason, busy, onClose, onSubmit, fullScreen = false }) {
+  const canSubmit = reason.trim().length >= 3;
+  return (
+    <Dialog open={open} onClose={onClose} fullScreen={fullScreen} maxWidth="sm" fullWidth>
+      <DialogTitle>Delete Request</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+          <Alert severity="error">
+            This permanently deletes {request?.request_number} and all related workflow data. This action cannot be undone.
+          </Alert>
+          <Typography variant="body2" color="text.secondary">
+            Only System Administrators can delete requests. Your action will be recorded in the audit log.
+          </Typography>
+          <TextField
+            label="Reason for deletion"
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            multiline
+            minRows={3}
+            required
+            helperText="Minimum 3 characters"
+            disabled={busy}
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="contained" color="error" onClick={onSubmit} disabled={busy || !canSubmit}>
+          Delete Request
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function WorkItemHeader({ request, canEdit, onEdit, onViewReport, canDelete = false, onDelete }) {
   async function copyRequestNumber() {
     await navigator.clipboard?.writeText(request.request_number);
   }
@@ -1029,6 +1197,11 @@ function WorkItemHeader({ request, canEdit, onEdit, onViewReport }) {
             {canEdit && (
               <Button variant="contained" size="small" onClick={onEdit}>
                 Edit Request
+              </Button>
+            )}
+            {canDelete && (
+              <Button variant="outlined" color="error" size="small" onClick={onDelete}>
+                Delete Request
               </Button>
             )}
             <Button variant={isFinalOutcomeReady ? 'contained' : 'outlined'} color={isFinalOutcomeReady ? 'success' : 'primary'} size="small" onClick={onViewReport}>
@@ -1466,7 +1639,7 @@ function ScopeReportBlock({ label, value, wide = false }) {
   );
 }
 
-function PlanningWorkspace({ request, user, scopes, stories, requirementsReview, onRefresh, showToast, setError }) {
+function PlanningWorkspace({ request, user, scopes, stories, requirementsReview, preselectedRequirementsAction = '', onRequirementsActionConsumed, onRefresh, showToast, setError }) {
   const [scopeForm, setScopeForm] = useState(scopeFormDefaults);
   const [storyForm, setStoryForm] = useState(storyFormDefaults);
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
@@ -1821,6 +1994,8 @@ function PlanningWorkspace({ request, user, scopes, stories, requirementsReview,
                   request={request}
                   reviewPackage={requirementsReview}
                   canReviewPlanning={canReviewPlanning}
+                  preselectedAction={preselectedRequirementsAction}
+                  onPreselectedActionConsumed={onRequirementsActionConsumed}
                   onReviewAction={runRequirementsReviewAction}
                 />
               ) : (
@@ -2422,10 +2597,11 @@ function ProjectWorkspaceStepper({ tabs, activeTab, onChange }) {
   );
 }
 
-function RequirementsReviewPanel({ request, reviewPackage, canReviewPlanning, onReviewAction }) {
+function RequirementsReviewPanel({ request, reviewPackage, canReviewPlanning, preselectedAction = '', onPreselectedActionConsumed, onReviewAction }) {
   const [comment, setComment] = useState('');
   const [clarificationNote, setClarificationNote] = useState('');
   const [selectedRevisionId, setSelectedRevisionId] = useState('');
+  const preselectedAppliedRef = useRef(false);
   const currentRevision = reviewPackage?.currentRevision;
   const reviews = reviewPackage?.reviews || [];
   const changeLog = reviewPackage?.changeLog || [];
@@ -2465,14 +2641,24 @@ function RequirementsReviewPanel({ request, reviewPackage, canReviewPlanning, on
     if (clarificationNote.trim().length < 3) return;
     await onReviewAction('/request-clarification', { reasonCategory: 'MISSING_REQUIREMENTS', note: clarificationNote }, 'Requirements clarification requested.');
     setClarificationNote('');
+    onPreselectedActionConsumed?.();
   }
+
+  useEffect(() => {
+    if (!preselectedAction || preselectedAppliedRef.current || !canReviewPlanning) return;
+    if (preselectedAction === 'clarification') {
+      preselectedAppliedRef.current = true;
+      onPreselectedActionConsumed?.();
+    }
+  }, [preselectedAction, canReviewPlanning, onPreselectedActionConsumed]);
 
   if (!currentRevision && !['REQUIREMENTS_DEPARTMENT_REVIEW', 'REQUIREMENTS_PM_REVIEW', 'REQUIREMENTS_IT_REVIEW', 'REQUIREMENTS_CLARIFICATION_REQUESTED', 'REQUIREMENTS_APPROVED'].includes(request.status)) {
     return null;
   }
 
   return (
-    <PlanningSection title="Requirement Review" caption={selectedRevision ? `Revision ${selectedRevisionNumber} of ${revisionCount || selectedRevisionNumber}` : 'No revision submitted yet'}>
+    <Box id="requirements-review-panel">
+      <PlanningSection title="Requirement Review" caption={selectedRevision ? `Revision ${selectedRevisionNumber} of ${revisionCount || selectedRevisionNumber}` : 'No revision submitted yet'}>
       <Stack spacing={1.75}>
         <Box sx={{ p: 1.5, borderRadius: 2.25, bgcolor: (theme) => theme.custom.semantic.paperSoft, border: (theme) => `1px solid ${theme.custom.semantic.borderSoft}` }}>
           <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} sx={{ justifyContent: 'space-between', alignItems: { md: 'center' } }}>
@@ -2570,6 +2756,7 @@ function RequirementsReviewPanel({ request, reviewPackage, canReviewPlanning, on
         <RequirementConversation items={conversationItems} />
       </Stack>
     </PlanningSection>
+    </Box>
   );
 }
 
@@ -6015,6 +6202,7 @@ function WorkflowActions(props) {
     timeline = [],
     navigate,
     showToast,
+    preselectedActionId = '',
   } = props;
   const role = user?.roleCode;
   const isAdmin = role === 'SYSTEM_ADMIN';
@@ -6048,17 +6236,24 @@ function WorkflowActions(props) {
   const canRequesterComplete = request.status === 'READY_FOR_COMPLETION'
     && (isAdmin || Number(request.requester_user_id) === Number(user?.id));
   const canCloseRequest = request.status === 'DEPLOYED' && (role === 'PROJECT_MANAGER' || role === 'IT_HEAD' || isAdmin);
-  const hasActions = canDepartmentApprove || canRespondClarification || canReviewIt || canResumeDeferred || canAssignProjectManager || canManagePlanning || canAssign || canStartDevelopment || canSubmitDevelopmentForReview || canSubmitForQa || canSendQaReworkToDeveloper || canSendToRequesterTesting || canTest || canUat || canCompleteDeployment || canRequesterComplete || canCloseRequest;
+  const canWithdrawRequest = Number(request.requester_user_id) === Number(user?.id)
+    && !terminalRequestStatuses.includes(request.status);
+  const hasActions = canDepartmentApprove || canRespondClarification || canReviewIt || canResumeDeferred || canAssignProjectManager || canManagePlanning || canAssign || canStartDevelopment || canSubmitDevelopmentForReview || canSubmitForQa || canSendQaReworkToDeveloper || canSendToRequesterTesting || canTest || canUat || canCompleteDeployment || canRequesterComplete || canCloseRequest || canWithdrawRequest;
   const [selectedActionId, setSelectedActionId] = useState('');
   const [clarificationDetails, setClarificationDetails] = useState({ reasonCategory: 'MISSING_REQUIREMENTS', note: '' });
   const [qaReworkTasks, setQaReworkTasks] = useState([{ title: '', description: '', priority: 'HIGH' }]);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
-    setSelectedActionId('');
+    setSelectedActionId(preselectedActionId || '');
     setActionComment('');
     setClarificationDetails({ reasonCategory: 'MISSING_REQUIREMENTS', note: '' });
     setQaReworkTasks([{ title: '', description: '', priority: 'HIGH' }]);
+    if (preselectedActionId === 'qa-pass') {
+      setTestResult((current) => ({ ...current, result: 'PASS' }));
+    } else if (preselectedActionId === 'qa-fail') {
+      setTestResult((current) => ({ ...current, result: 'FAIL' }));
+    }
     if (request.active_assignment_id) {
       setAssignment({
         developerUserId: request.active_developer_user_id || '',
@@ -6073,9 +6268,9 @@ function WorkflowActions(props) {
         notes: '',
       });
     }
-  }, [request.id, request.status, request.project_manager_user_id, request.active_assignment_id, request.active_developer_user_id, request.active_qa_user_id, setActionComment, setAssignment]);
+  }, [request.id, request.status, request.project_manager_user_id, request.active_assignment_id, request.active_developer_user_id, request.active_qa_user_id, preselectedActionId, setActionComment, setAssignment, setTestResult]);
 
-  if (!hasActions) {
+  if (!hasActions && !preselectedActionId) {
     return null;
   }
 
@@ -6459,6 +6654,20 @@ function WorkflowActions(props) {
       requireDecisionNotes: true,
       submitLabel: 'Close Request',
       onSubmit: () => runAction('/close', { comment: actionComment }),
+    });
+  }
+
+  if (canWithdrawRequest) {
+    actionGroups.push({
+      id: 'withdraw-request',
+      label: 'Withdraw Request',
+      description: 'Cancel this request and stop all further workflow actions',
+      tone: 'error',
+      icon: XCircle,
+      requireDecisionNotes: true,
+      submitLabel: 'Withdraw Request',
+      helper: 'All relevant stakeholders will be notified that you withdrew this request.',
+      onSubmit: () => runAction('/withdraw', { comment: actionComment }),
     });
   }
 

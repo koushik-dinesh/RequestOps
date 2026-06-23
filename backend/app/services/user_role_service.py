@@ -3,6 +3,16 @@ from sqlalchemy.orm import Session
 from app.core.database import execute, one, rows
 from app.utils.http import ApiError
 
+REQUESTABLE_ROLE_CODES = frozenset({
+    "EMPLOYEE",
+    "DEPARTMENT_HEAD",
+    "IT_HEAD",
+    "PROJECT_MANAGER",
+    "DEVELOPER",
+    "QA",
+    "UAT_APPROVER",
+})
+
 
 def get_user_roles(db: Session, user_id: int) -> list[dict]:
     return rows(
@@ -61,6 +71,8 @@ def grant_user_role(db: Session, user_id: int, role_id: int, granted_by_user_id:
 
 
 def create_role_access_request(db: Session, user_id: int, requested_role_code: str, reason: str | None) -> dict:
+    if requested_role_code not in REQUESTABLE_ROLE_CODES:
+        raise ApiError(400, "Choose a valid role.")
     role = one(db, "SELECT id, code, name FROM roles WHERE code = :code AND is_active = TRUE", {"code": requested_role_code})
     if not role:
         raise ApiError(400, "Choose a valid role.")

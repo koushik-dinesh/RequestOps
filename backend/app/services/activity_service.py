@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import SessionLocal, execute, rows
 from app.services.email_service import send_email
+from app.services.workflow_email_actions_service import enrich_request_email_html, enrich_request_email_text
 
 
 def _json(value: Any) -> str | None:
@@ -257,6 +258,8 @@ def notify(
     request_email_context = _request_email_context(db, request_id)
     body = email_body or _default_request_email_text(title=title, message=message, request_row=request_email_context)
     html_body = email_html_body if email_html_body is not None else _default_request_email_html(title=title, message=message, request_row=request_email_context)
+    body = enrich_request_email_text(db, body, request_id, recipient_user_id)
+    html_body = enrich_request_email_html(db, html_body, request_id, recipient_user_id)
     def send() -> None:
         try:
             if audit_email:

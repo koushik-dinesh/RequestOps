@@ -16,7 +16,7 @@ import {
 import api from '../api/client';
 import StatusBadge from '../components/StatusBadge';
 import { PageSkeleton } from '../components/LoadingState';
-import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
+import { formatEnum, missingReportingAuthorityText, panelApiPrefix, panelRoute } from '../utils/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { canCreateRequest, canUseAdminConsole } from '../auth/permissions';
 import { Page } from '../components/LayoutPrimitives';
@@ -45,7 +45,7 @@ export default function DashboardPage() {
       const [userRows, registrationRows] = user?.roleCode === 'SYSTEM_ADMIN'
         ? await Promise.all([
           api.get('/users').catch(() => []),
-          api.get('/admin/registrations?status=PENDING_APPROVAL').catch(() => []),
+          api.get(`${panelApiPrefix}/registrations?status=PENDING_APPROVAL`).catch(() => []),
         ])
         : [[], []];
       setDashboard(dashboardData);
@@ -79,7 +79,7 @@ export default function DashboardPage() {
     head: department.department_head_name || missingReportingAuthorityText,
     hasHead: Boolean(department.department_head_name),
     count: requests.filter((request) => request.department_name === department.name).length,
-    pending: requests.filter((request) => request.department_name === department.name && !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED'].includes(request.status)).length,
+    pending: requests.filter((request) => request.department_name === department.name && !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED', 'WITHDRAWN'].includes(request.status)).length,
     completed: requests.filter((request) => request.department_name === department.name && request.status === 'CLOSED').length,
   })).map((department) => ({
     ...department,
@@ -123,8 +123,8 @@ export default function DashboardPage() {
           actions={(
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ width: { xs: '100%', md: 'auto' } }}>
               {canCreateRequest(user?.roleCode) && <Button component={Link} to="/requests/new" variant="contained" startIcon={<Plus size={16} />}>Create Request</Button>}
-              {canUseAdminConsole(user?.roleCode) && <Button component={Link} to="/admin" variant="outlined" startIcon={<Building2 size={16} />}>Add Department</Button>}
-              {canUseAdminConsole(user?.roleCode) && <Button component={Link} to="/admin" variant="outlined" startIcon={<UserPlus size={16} />}>Add User</Button>}
+              {canUseAdminConsole(user?.roleCode) && <Button component={Link} to={panelRoute} variant="outlined" startIcon={<Building2 size={16} />}>Add Department</Button>}
+              {canUseAdminConsole(user?.roleCode) && <Button component={Link} to={panelRoute} variant="outlined" startIcon={<UserPlus size={16} />}>Add User</Button>}
             </Stack>
           )}
         />
@@ -394,7 +394,7 @@ function DepartmentMetric({ label, value, tone = 'info' }) {
 }
 
 function EmployeeRequestOverview({ requests }) {
-  const activeRequests = requests.filter((request) => !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED'].includes(request.status));
+  const activeRequests = requests.filter((request) => !['CLOSED', 'DEPARTMENT_REJECTED', 'IT_REJECTED', 'WITHDRAWN'].includes(request.status));
   const pendingApprovals = requests.filter((request) => ['DEPARTMENT_APPROVAL_PENDING', 'IT_REVIEW_PENDING'].includes(request.status));
   const responseNeeded = requests.filter((request) => request.status === 'CLARIFICATION_REQUESTED');
   const recentRequests = [...requests]

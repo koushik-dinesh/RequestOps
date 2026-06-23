@@ -61,7 +61,7 @@ import { useAuth } from '../auth/AuthProvider';
 import StatusBadge from '../components/StatusBadge';
 import { Page } from '../components/LayoutPrimitives';
 import PageHeader from '../components/PageHeader';
-import { formatEnum, missingReportingAuthorityText } from '../utils/constants';
+import { formatEnum, missingReportingAuthorityText, panelApiPrefix } from '../utils/constants';
 
 const lifecycleRoleCodes = ['SYSTEM_ADMIN', 'DEPARTMENT_HEAD', 'EMPLOYEE'];
 const emptyResponsibilities = { total: 0, items: [] };
@@ -144,8 +144,8 @@ export default function AdminPage() {
   async function load() {
     setLoading(true);
     const [registrationRows, roleAccessRows, userRows, departmentRows, roleRows] = await Promise.all([
-      api.get('/admin/registrations?status=PENDING_APPROVAL'),
-      api.get('/admin/role-access-requests?status=PENDING'),
+      api.get(`${panelApiPrefix}/registrations?status=PENDING_APPROVAL`),
+      api.get(`${panelApiPrefix}/role-access-requests?status=PENDING`),
       api.get('/users'),
       api.get('/departments'),
       api.get('/users/roles'),
@@ -191,7 +191,7 @@ export default function AdminPage() {
     }
     try {
       setError('');
-      await api.post(`/admin/registrations/${registrationId}/approve`, payload);
+      await api.post(`${panelApiPrefix}/registrations/${registrationId}/approve`, payload);
       setMessage('Registration approved.');
       await load();
     } catch (err) {
@@ -202,7 +202,7 @@ export default function AdminPage() {
   async function reject(registrationId) {
     try {
       setError('');
-      await api.post(`/admin/registrations/${registrationId}/reject`, { reason: 'Rejected by admin during review.' });
+      await api.post(`${panelApiPrefix}/registrations/${registrationId}/reject`, { reason: 'Rejected by admin during review.' });
       setMessage('Registration rejected.');
       await load();
     } catch (err) {
@@ -213,7 +213,7 @@ export default function AdminPage() {
   async function approveRoleAccess(requestId) {
     try {
       setError('');
-      await api.post(`/admin/role-access-requests/${requestId}/approve`);
+      await api.post(`${panelApiPrefix}/role-access-requests/${requestId}/approve`);
       setMessage('Additional role access approved.');
       await load();
     } catch (err) {
@@ -224,7 +224,7 @@ export default function AdminPage() {
   async function rejectRoleAccess(requestId) {
     try {
       setError('');
-      await api.post(`/admin/role-access-requests/${requestId}/reject`, { reason: 'Rejected by admin during review.' });
+      await api.post(`${panelApiPrefix}/role-access-requests/${requestId}/reject`, { reason: 'Rejected by admin during review.' });
       setMessage('Additional role access request rejected.');
       await load();
     } catch (err) {
@@ -1073,7 +1073,7 @@ function EmployeeManagementPanel({
     closeMenu();
     if (action === 'reset-password') {
       try {
-        await api.post(`/admin/users/${user.id}/reset-password`, { password: 'Password123!' });
+        await api.post(`${panelApiPrefix}/users/${user.id}/reset-password`, { password: 'Password123!' });
         onMessage(`Password reset for ${user.full_name}. Temporary password: Password123!`);
       } catch (err) {
         onError(err.message);

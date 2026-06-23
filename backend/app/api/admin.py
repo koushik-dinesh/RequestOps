@@ -15,7 +15,7 @@ from app.services.user_role_service import (
 from app.utils.http import ApiError, ok
 
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_roles("SYSTEM_ADMIN"))])
+router = APIRouter(prefix="/panel", tags=["panel"], dependencies=[Depends(require_roles("SYSTEM_ADMIN"))])
 
 
 @router.get("/registrations")

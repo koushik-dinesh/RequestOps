@@ -20,7 +20,7 @@ import FactCheckRoundedIcon from '@mui/icons-material/FactCheckRounded';
 import CodeRoundedIcon from '@mui/icons-material/CodeRounded';
 import ScienceRoundedIcon from '@mui/icons-material/ScienceRounded';
 import RocketLaunchRoundedIcon from '@mui/icons-material/RocketLaunchRounded';
-import { Link as RouterLink, Navigate, useNavigate } from 'react-router-dom';
+import { Link as RouterLink, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { useThemeMode } from '../theme/ThemeModeProvider';
 import { roleLabels } from '../utils/constants';
@@ -40,6 +40,8 @@ export default function LoginPage() {
   const { mode, toggleMode } = useThemeMode();
   const semantic = theme.custom.semantic;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTarget = searchParams.get('redirect') || '/';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -48,7 +50,7 @@ export default function LoginPage() {
   const [pendingUser, setPendingUser] = useState(null);
   const [submittingRole, setSubmittingRole] = useState('');
 
-  if (isAuthenticated) return <Navigate to="/" replace />;
+  if (isAuthenticated) return <Navigate to={redirectTarget} replace />;
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -61,7 +63,7 @@ export default function LoginPage() {
         setPendingUser(result.user);
         return;
       }
-      navigate('/');
+      navigate(redirectTarget, { replace: true });
     } catch (err) {
       setError(err.message);
     }
@@ -72,7 +74,7 @@ export default function LoginPage() {
     setSubmittingRole(roleCode);
     try {
       await completeLogin(email, password, roleCode);
-      navigate('/');
+      navigate(redirectTarget, { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

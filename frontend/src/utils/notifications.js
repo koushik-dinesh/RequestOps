@@ -11,6 +11,7 @@ export const notificationFilters = [
 const notificationTypeRules = [
   { match: ['REQUIREMENTS_REVIEW_PENDING', 'REQUIREMENTS_APPROVAL_INVALIDATED', 'APPROVAL', 'AWAITING_APPROVAL', 'IT_REVIEW_PENDING', 'UAT_PENDING', 'USER_STORIES_REVIEW'], label: 'Approval Required', category: 'APPROVALS', tone: 'warning' },
   { match: ['REQUIREMENTS_FULLY_APPROVED', 'REQUIREMENTS_APPROVED_BY_REVIEWER'], label: 'Requirements Approved', category: 'APPROVALS', tone: 'success' },
+  { match: ['WITHDRAWN'], label: 'Request Withdrawn', category: 'SYSTEM', tone: 'neutral' },
   { match: ['APPROVED', 'CLOSED'], label: 'Approved', category: 'APPROVALS', tone: 'success' },
   { match: ['REJECTED', 'FAILED'], label: 'Rejected', category: 'APPROVALS', tone: 'error' },
   { match: ['REQUIREMENTS_CLARIFICATION', 'CLARIFICATION'], label: 'Clarification Received', category: 'CLARIFICATIONS', tone: 'info' },

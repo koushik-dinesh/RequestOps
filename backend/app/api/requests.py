@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import execute, get_db, one, rows
-from app.middleware.auth import get_current_user
+from app.middleware.auth import get_current_user, require_roles
 from app.schemas.payloads import (
     AssignPayload,
     ClarificationPayload,
@@ -80,10 +80,11 @@ from app.repositories.requirements_repository import (
     update_requirement_revision_status,
 )
 from app.services.activity_service import audit, notify
+from app.services.workflow_email_actions_service import get_workflow_actions_for_user
 from app.services.upload_service import save_upload
 from app.utils.http import ApiError, ok
 from app.utils.routing import collection_route
-from app.workflows.request_workflow import get_request_by_id, transition_request
+from app.workflows.request_workflow import can_requester_withdraw, delete_request, get_request_by_id, transition_request, withdraw_request
 
 
 READ_ONLY_REQUEST_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -95,11 +96,11 @@ def prevent_completed_request_mutations(request_context: FastAPIRequest, user: d
     request_id = request_context.path_params.get("request_id")
     if not request_id:
         return
-    if request_context.url.path.endswith("/report/audit"):
+    if request_context.url.path.endswith("/report/audit") or request_context.url.path.endswith("/delete"):
         return
     request_row = one(db, "SELECT status FROM requests WHERE id = :requestId", {"requestId": request_id})
-    if request_row and request_row["status"] == "CLOSED":
-        raise ApiError(409, "Completed requests are locked and cannot be edited.")
+    if request_row and request_row["status"] in ("CLOSED", "WITHDRAWN"):
+        raise ApiError(409, "This request is no longer active and cannot be edited.")
 
 
 router = APIRouter(prefix="/requests", tags=["requests"], dependencies=[Depends(get_current_user), Depends(prevent_completed_request_mutations)])
@@ -588,6 +589,35 @@ def resolve_request_uat_approver_id(db: Session, request_row: dict) -> int:
 
 def unique_recipient_ids(*user_ids: int | None) -> list[int]:
     return list(dict.fromkeys([int(user_id) for user_id in user_ids if user_id]))
+
+
+def collect_request_stakeholder_user_ids(db: Session, request_row: dict) -> list[int]:
+    assignment = get_active_assignment(db, request_row["id"])
+    sprint_assignees = rows(
+        db,
+        """
+        SELECT DISTINCT t.assigned_developer_user_id AS user_id
+        FROM sprint_tasks t
+        JOIN sprints s ON s.id = t.sprint_id
+        WHERE s.request_id = :requestId AND t.assigned_developer_user_id IS NOT NULL
+        """,
+        {"requestId": request_row["id"]},
+    )
+    candidate_ids = [
+        request_row.get("department_head_user_id"),
+        request_row.get("it_head_user_id"),
+        request_row.get("project_manager_user_id"),
+        request_row.get("current_assignee_user_id"),
+        assignment.get("developer_user_id") if assignment else None,
+        assignment.get("qa_user_id") if assignment else None,
+        *(row["user_id"] for row in sprint_assignees),
+    ]
+    requester_id = int(request_row["requester_user_id"])
+    return [
+        user_id
+        for user_id in unique_recipient_ids(*candidate_ids)
+        if user_id and int(user_id) != requester_id
+    ]
 
 
 def app_request_url(request_id: int) -> str:
@@ -1146,6 +1176,13 @@ def request_detail(request_id: int, user: dict = Depends(get_current_user), db: 
         raise ApiError(404, "Request not found.")
     assert_can_view(db, user, request_row)
     return ok(request_with_roi_calculation(request_row))
+
+
+@router.get("/{request_id}/workflow-actions")
+def request_workflow_actions(request_id: int, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    request_row = assert_request_access(db, user, request_id)
+    assert_can_view(db, user, request_row)
+    return ok(get_workflow_actions_for_user(db, user, request_id))
 
 
 def update_request_details_impl(request_id: int, payload: RequestDetailsPayload, request_context: FastAPIRequest, user: dict, db: Session):
@@ -3088,6 +3125,57 @@ def requester_complete_request(request_id: int, payload: OptionalCommentPayload,
     for recipient_id in unique_recipient_ids(request_row.get("project_manager_user_id"), request_row.get("department_head_user_id"), request_row.get("it_head_user_id"), request_row.get("requester_user_id")):
         notify(db, recipient_user_id=recipient_id, request_id=request_row["id"], type="REQUEST_COMPLETED_BY_REQUESTER", title="Request completed by requester", message=f"{request_row['request_number']} has been completed by the requester.", background_tasks=background_tasks)
     audit(db, actor_user_id=user["id"], action="REQUEST_COMPLETED_BY_REQUESTER", entity_type="REQUEST", entity_id=request_row["id"], new_value={"comment": comment}, request=request_context)
+    db.commit()
+    return ok(updated)
+
+
+@router.post("/{request_id}/delete")
+def delete_request_endpoint(
+    request_id: int,
+    payload: RequiredCommentPayload,
+    request_context: FastAPIRequest,
+    admin: dict = Depends(require_roles("SYSTEM_ADMIN")),
+    db: Session = Depends(get_db),
+):
+    request_row = get_request_by_id(db, request_id)
+    if not request_row:
+        raise ApiError(404, "Request not found.")
+    delete_request(
+        db,
+        request_id=request_id,
+        actor_user_id=admin["id"],
+        comment=payload.comment,
+        request_context=request_context,
+    )
+    db.commit()
+    return ok({"deleted": True, "requestId": request_id})
+
+
+@router.post("/{request_id}/withdraw")
+def withdraw_request_endpoint(request_id: int, payload: OptionalCommentPayload, request_context: FastAPIRequest, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    request_row = assert_request_access(db, user, request_id)
+    if int(user["id"]) != int(request_row["requester_user_id"]):
+        raise ApiError(403, "Only the original requester can withdraw this request.")
+    comment = payload.comment or "Request withdrawn by requester."
+    add_comment(db, request_row["id"], user["id"], "STATUS_UPDATE", comment)
+    updated = withdraw_request(
+        db,
+        request_id=request_row["id"],
+        actor_user_id=user["id"],
+        comment=comment,
+        request_context=request_context,
+    )
+    requester_name = user.get("full_name") or "The requester"
+    for recipient_id in collect_request_stakeholder_user_ids(db, request_row):
+        notify(
+            db,
+            recipient_user_id=recipient_id,
+            request_id=request_row["id"],
+            type="REQUEST_WITHDRAWN",
+            title="Request withdrawn",
+            message=f"{request_row['request_number']} was withdrawn by {requester_name}.",
+            background_tasks=background_tasks,
+        )
     db.commit()
     return ok(updated)
 
